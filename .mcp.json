@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "nosleep": {
+      "type": "http",
+      "url": "http://localhost:3777/api/mcp",
+      "headers": {
+        "x-nosleep-org": "org_personal"
+      }
+    }
+  }
+}

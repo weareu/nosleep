@@ -1,0 +1,33 @@
+{
+  "name": "nosleep",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "private": true,
+  "description": "Autonomous Claude Code project orchestrator and dashboard",
+  "workspaces": [
+    "packages/shared",
+    "packages/server",
+    "packages/mcp-memory",
+    "packages/mcp-control",
+    "packages/mcp-brain",
+    "packages/mcp-gateway",
+    "packages/web",
+    "packages/mobile"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev:server": "npm run dev -w packages/server",
+    "dev:web": "npm run dev -w packages/web",
+    "setup": "node scripts/setup.mjs",
+    "doctor": "node scripts/setup.mjs doctor",
+    "postinstall": "npm rebuild better-sqlite3 && npm run build -w @nosleep/shared",
+    "test": "npm test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.2"
+  }
+}

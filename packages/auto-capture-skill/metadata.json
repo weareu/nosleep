@@ -1,0 +1,23 @@
+{
+  "name": "auto-capture",
+  "version": "2.0.0",
+  "description": "Capture ACT NOW items and session summaries to the NoSleep Brain when a session ends.",
+  "author": "NoSleep",
+  "license": "AGPL-3.0-only",
+  "tags": [
+    "brain",
+    "capture",
+    "skill"
+  ],
+  "depends_on_mcp_servers": [
+    "nosleep-brain-*"
+  ],
+  "trigger_hints": [
+    "wrap up",
+    "park this",
+    "goodnight",
+    "let's stop here",
+    "that's it for now",
+    "session_end"
+  ]
+}

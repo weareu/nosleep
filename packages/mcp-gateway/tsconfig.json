@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    // rootDir is the repo root, not ./src: the test helper imports server src
+    // (initializeDatabase) and the package runs via tsx (not dist), so a ./src
+    // rootDir would TS6059 on that intentional cross-package import.
+    "rootDir": "../.."
+  },
+  "include": ["src"]
+}
