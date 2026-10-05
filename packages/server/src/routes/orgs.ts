@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type Database from "better-sqlite3";
+import { LIVE_SESSION_STATUSES_SQL } from "@nosleep/shared";
 
 export function registerOrgRoutes(
   fastify: FastifyInstance,
@@ -18,7 +19,7 @@ export function registerOrgRoutes(
     );
     const sessionCounts = new Map(
       // Direct sessions.org_id — no JOIN through projects
-      (db.prepare(`SELECT org_id, COUNT(*) as count FROM sessions WHERE status IN ('starting', 'running', 'idle', 'waiting_input') GROUP BY org_id`).all() as Array<{ org_id: string; count: number }>)
+      (db.prepare(`SELECT org_id, COUNT(*) as count FROM sessions WHERE status IN ${LIVE_SESSION_STATUSES_SQL} GROUP BY org_id`).all() as Array<{ org_id: string; count: number }>)
         .map(r => [r.org_id, r.count])
     );
     const alertCounts = new Map(

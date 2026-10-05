@@ -15,6 +15,7 @@ import {
   getArtifact,
   sessionArtifacts,
   captureUrl,
+  ingestFileApi,
   captureThoughtApi,
   listThoughtsApi,
   searchThoughtsApi,
@@ -209,6 +210,40 @@ server.tool(
         content: [
           { type: "text" as const, text: `capture failed: ${(err as Error).message}` },
         ],
+        isError: true,
+      };
+    }
+  },
+);
+
+// ── ingest_file ──────────────────────────────────────────
+
+server.tool(
+  "ingest_file",
+  "Upload a document into the brain archive (PDF, Markdown/text, code, JSON/YAML/CSV, images) — the same pipeline as the web upload: dedup, full-text + semantic indexing, PDF page excerpts, and auto-distillation into a thought. Pass `path` (inside the project's directory; dotfiles refused) OR `content_base64` + `filename`. Max 10 MB.",
+  {
+    project_id: z.string().describe("Project to file the document under"),
+    path: z.string().optional().describe("Local file path, absolute or relative to the project directory"),
+    content_base64: z.string().optional().describe("Inline file bytes as base64 (instead of path)"),
+    filename: z.string().optional().describe("File name incl. extension (required with content_base64; overrides the basename for path)"),
+    content_type: z.string().optional().describe("MIME type override; inferred from the extension otherwise"),
+  },
+  async (args) => {
+    try {
+      const res = await ingestFileApi({ org_id: ORG_ID, ...args });
+      const pages = res.page_count ? ` · ${res.page_count} page(s) extracted` : "";
+      const warn = res.warnings.length ? `\nwarnings: ${res.warnings.join("; ")}` : "";
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `${res.duplicate ? "Already in the brain (dedup hit — now linked to this project)" : "Ingested"}: ${res.filename} → ${res.kind} (${res.size} bytes)${pages}\nhash: ${res.hash}${warn}`,
+          },
+        ],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: "text" as const, text: `ingest_file failed: ${(err as Error).message}` }],
         isError: true,
       };
     }

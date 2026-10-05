@@ -15,6 +15,7 @@ const DEFAULT_EMBED_PREFIXES = [
   "document/markdown",
   "document/web_fetch",
   "document/pdf_excerpt",
+  "document/text",
   "document/spec",
   "document/readme",
   "reference/link",
@@ -51,6 +52,7 @@ export function extractorsForKind(kind: string): string[] {
     kind === "document/markdown" ||
     kind === "document/web_fetch" ||
     kind === "document/pdf_excerpt" ||
+    kind === "document/text" ||
     kind === "document/spec" ||
     kind === "document/readme" ||
     kind === "reference/link"

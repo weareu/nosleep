@@ -24,6 +24,7 @@ import {
 } from "../hooks/handlers.js";
 import { ingestTranscriptOffThread, ingestArtifactsOffThread } from "../ingest/transcript-worker-client.js";
 import type { IngestRequestT } from "../ingest/types.js";
+import { ingestReadDocument } from "../hooks/read-document.js";
 
 const hookBase = {
   orgId: z.string().optional(),
@@ -113,7 +114,9 @@ export function registerBrainHookIngestRoutes(
   fastify.post("/api/brain/hook-ingest/post-tool", async (req) => {
     const p = postToolSchema.safeParse(req.body);
     if (!p.success) return { ok: false, error: p.error.message };
-    return { ok: true, ...queueBatch(fromPostTool(withProject(p.data)), (m) => fastify.log.warn(m)) };
+    const payload = withProject(p.data);
+    void ingestReadDocument(payload, (msg, ctx) => fastify.log.warn(ctx, msg));
+    return { ok: true, ...queueBatch(fromPostTool(payload), (m) => fastify.log.warn(m)) };
   });
 
   fastify.post("/api/brain/hook-ingest/pre-compact", async (req) => {

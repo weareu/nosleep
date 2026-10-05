@@ -1,7 +1,10 @@
 /**
  * Best-effort text extraction for FTS indexing. Returns NULL for kinds that
- * have no immediate textual content (media/* — Phase 5 will fill via OCR/caption).
+ * have no immediate textual content (media/* — Phase 5 will fill via OCR/caption)
+ * and for binary payloads (PDF bytes are indexed per page by pdf-handler).
  */
+
+import { isBinaryContentType } from "./hash.js";
 
 export function tryExtractText(
   kind: string,
@@ -12,15 +15,7 @@ export function tryExtractText(
   if (kind.startsWith("media/")) return null;
 
   // Binary content types → skip
-  const ct = (contentType ?? "").toLowerCase();
-  if (
-    ct.startsWith("image/") ||
-    ct.startsWith("video/") ||
-    ct.startsWith("audio/") ||
-    ct === "application/octet-stream"
-  ) {
-    return null;
-  }
+  if (isBinaryContentType(contentType)) return null;
 
   // Everything else: decode as utf-8
   try {

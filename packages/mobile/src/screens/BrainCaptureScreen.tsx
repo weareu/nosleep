@@ -36,6 +36,7 @@ import {
   type VoiceRecordingResult,
 } from "../services/voice";
 import { colors } from "../theme";
+import { report as clientLog } from "../services/clientLog";
 import { OrgProjectPicker } from "../components/OrgProjectPicker";
 import { StrategyParentPicker } from "../components/StrategyParentPicker";
 
@@ -64,13 +65,19 @@ type ImagePickerModule = {
 };
 
 let imagePicker: ImagePickerModule | null | undefined;
+let imagePickerLoadError: string | null = null;
+
 function getImagePicker(): ImagePickerModule | null {
   if (imagePicker !== undefined) return imagePicker;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     imagePicker = require("expo-image-picker") as ImagePickerModule;
-  } catch {
+  } catch (err) {
+    // expo-image-picker IS a dependency; a throw here means the installed
+    // app binary predates it (native module missing) — rebuild the app.
     imagePicker = null;
+    imagePickerLoadError = err instanceof Error ? err.message : String(err);
+    clientLog("error", "brain.image-picker", imagePickerLoadError);
   }
   return imagePicker;
 }
@@ -269,8 +276,13 @@ export function BrainCaptureScreen(): React.JSX.Element {
     if (attachedImage) {
       refs.push({ hash: attachedImage.hash, relation: "references" });
     }
+    let audioWarning: string | null = null;
     if (pendingAudio) {
       const b64 = await readAudioAsBase64(pendingAudio.uri);
+      if (!b64) {
+        audioWarning = "recording could not be read";
+        clientLog("warn", "brain.audio", "readAudioAsBase64 returned null", { uri: pendingAudio.uri });
+      }
       if (b64) {
         try {
           const audioArtifact = await ingestAudio({
@@ -282,8 +294,10 @@ export function BrainCaptureScreen(): React.JSX.Element {
             transcript: content.trim() || undefined,
           });
           refs.push({ hash: audioArtifact.hash, relation: "recorded_as" });
-        } catch {
-          /* audio upload non-fatal; still capture the thought */
+        } catch (err) {
+          // Non-fatal — still capture the thought — but never silent.
+          // (brainApi already reports HTTP/network failures to client-log.)
+          audioWarning = `recording failed to upload: ${err instanceof Error ? err.message : String(err)}`;
         }
       }
     }
@@ -302,11 +316,11 @@ export function BrainCaptureScreen(): React.JSX.Element {
       setTypeHint("");
       setAttachedImage(null);
       setPendingAudio(null);
-      setToast(
+      const base =
         res.similar_existing.length > 0
           ? `Captured — ${res.similar_existing.length} similar thought(s) exist`
-          : "Captured",
-      );
+          : "Captured";
+      setToast(audioWarning ? `${base} (${audioWarning})` : base);
       await loadRecent();
       setTimeout(() => setToast(null), 3_000);
     } catch (e) {
@@ -386,7 +400,9 @@ export function BrainCaptureScreen(): React.JSX.Element {
   async function onAttachPhoto() {
     const picker = getImagePicker();
     if (!picker) {
-      setToast("Run `npx expo install expo-image-picker` to enable photo attach");
+      setToast(
+        `Photo picker unavailable in this app build — rebuild the app (npx expo run:ios). ${imagePickerLoadError ?? ""}`.trim(),
+      );
       setTimeout(() => setToast(null), 4_000);
       return;
     }

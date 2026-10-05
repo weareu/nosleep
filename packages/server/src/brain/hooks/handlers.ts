@@ -5,6 +5,22 @@
  */
 
 import type { IngestRequestT } from "../ingest/types.js";
+import { isHookDocumentPath } from "./read-document.js";
+
+/**
+ * Claude Code's Read `tool_response` arrives JSON-stringified:
+ * {"type":"text","file":{"filePath","content",...}}. Store the file text,
+ * not the wrapper; anything else passes through unchanged.
+ */
+export function unwrapReadContent(resultText: string): string {
+  if (!resultText.startsWith("{")) return resultText;
+  try {
+    const parsed = JSON.parse(resultText) as { file?: { content?: unknown } };
+    return typeof parsed.file?.content === "string" ? parsed.file.content : resultText;
+  } catch {
+    return resultText;
+  }
+}
 
 interface BaseHookPayload {
   orgId?: string;
@@ -139,13 +155,17 @@ export function fromPostTool(p: PostToolPayload): IngestRequestT[] {
     }
     case "Read": {
       const filePath = (p.toolInput?.file_path as string) ?? "";
+      // Documents (.pdf/.md/.txt) are ingested from disk as document/*
+      // artifacts by ingestReadDocument — not as a JSON-wrapped snapshot.
+      if (isHookDocumentPath(filePath)) break;
+      const content = unwrapReadContent(resultText);
       results.push({
         ...base,
         kind: "code/file_snapshot",
-        content: resultText,
+        content,
         kind_specific_meta: {
           file_path: filePath,
-          line_count: resultText.split("\n").length,
+          line_count: content.split("\n").length,
         },
       });
       break;

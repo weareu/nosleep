@@ -29,6 +29,7 @@ import {
   type BrainGraphResponse,
 } from "../../lib/brainApi";
 import { useOrgProject } from "../../components/OrgProjectPicker";
+import { cullLabels, fitTransform } from "../../lib/graph-view";
 import { BrainNodeDetail } from "./BrainNodeDetail";
 // Phase 22-D — lazy-load the 3D renderer. ~600KB gz of Three.js + lib
 // shouldn't land on routes that don't actually open the 3D mode.
@@ -124,6 +125,14 @@ type ColourMode = "kind" | "thought_type" | "cluster" | "project";
 const LOD_HIDE_LIGHT_EDGES = 0.4;
 const LOD_LIGHT_EDGE_WEIGHT_CUTOFF = 0.4;
 const LOD_SHOW_LABELS = 1.4;
+/** Labels shown below LOD_SHOW_LABELS — the highest-degree hubs only. */
+const LOD_HUB_LABELS = 8;
+/** On-screen label font size (px) — counter-scaled so zoom never inflates it. */
+const LABEL_FONT_PX = 10;
+
+function labelText(node: BrainGraphNode): string {
+  return node.label.length > 32 ? node.label.slice(0, 30) + "…" : node.label;
+}
 
 export function BrainGraph(): React.ReactElement {
   const { scope } = useOrgProject();
@@ -150,6 +159,10 @@ export function BrainGraph(): React.ReactElement {
   const transformRef = useRef<ZoomTransform>(zoomIdentity);
   const zoomRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const nodesRef = useRef<SimNode[]>([]);
+  // Label culling inputs read from d3 callbacks (zoom / tick) without
+  // re-running the simulation effect.
+  const pinnedLabelIdsRef = useRef<Set<string>>(new Set());
+  const userMovedViewRef = useRef(false);
 
   // Phase 12 (UI review #2 — H/M) — incoming focus from the artifact,
   // thought, or session toolbars. The hash for artifacts and the id for
@@ -430,10 +443,13 @@ export function BrainGraph(): React.ReactElement {
       .scaleExtent([0.1, 6])
       .on("zoom", (event) => {
         transformRef.current = event.transform;
+        if (event.sourceEvent) userMovedViewRef.current = true;
         g.attr("transform", event.transform.toString());
         setZoomScale(event.transform.k);
+        refreshLabels();
       });
     zoomRef.current = zoomBehaviour;
+    userMovedViewRef.current = false;
     svg.call(zoomBehaviour as never).call(
       (s) => s.call(zoomBehaviour.transform as never, zoomIdentity),
     );
@@ -510,21 +526,23 @@ export function BrainGraph(): React.ReactElement {
 
     nodeSel.append("title").text((d) => d.label);
 
-    // Always-on label layer (visible only when zoomed in, controlled by LOD).
+    // Label layer. Which labels show is decided by refreshLabels():
+    // collision-culled by degree (hubs first) above the LOD zoom, and the
+    // hovered/selected node always. Each text is hidden until placed.
     const labelSel = g
       .append("g")
       .attr("class", "labels")
       .attr("pointer-events", "none")
-      .style("display", "none")
       .selectAll("text")
       .data(nodes)
       .enter()
       .append("text")
-      .attr("font-size", 10)
       .attr("fill", "#cbd5e1")
-      .attr("dx", (d) => radiusFor(d) + 3)
-      .attr("dy", 3)
-      .text((d) => (d.label.length > 32 ? d.label.slice(0, 30) + "…" : d.label));
+      .attr("paint-order", "stroke")
+      .attr("stroke", "#0b1220")
+      .attr("stroke-width", 3)
+      .style("display", "none")
+      .text((d) => labelText(d));
 
     const dragBehaviour = d3drag<SVGCircleElement, SimNode>()
       .on("start", (event, d) => {
@@ -549,6 +567,7 @@ export function BrainGraph(): React.ReactElement {
       });
     nodeSel.call(dragBehaviour as never);
 
+    let tickCount = 0;
     sim.on("tick", () => {
       linkSel
         .attr("x1", (d) => (d.source as SimNode).x ?? 0)
@@ -557,23 +576,121 @@ export function BrainGraph(): React.ReactElement {
         .attr("y2", (d) => (d.target as SimNode).y ?? 0);
       nodeSel.attr("cx", (d) => d.x ?? 0).attr("cy", (d) => d.y ?? 0);
       labelSel.attr("x", (d) => d.x ?? 0).attr("y", (d) => d.y ?? 0);
+      if (++tickCount % 8 === 0) refreshLabels();
     });
+    // Frame the settled layout once, unless the user already panned/zoomed
+    // or a focus target is about to take over the view.
+    sim.on("end", () => {
+      if (!userMovedViewRef.current && !focusId) fitView();
+      refreshLabels();
+    });
+    refreshLabels();
 
     return () => {
       sim.stop();
     };
+    // refreshLabels/fitView read refs only; focusId gates the auto-fit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filteredData, layoutMode, colourMode]);
+
+  /** Show the labels that fit, in priority order (see lib/graph-view). */
+  function refreshLabels(): void {
+    const svgEl = svgRef.current;
+    if (!svgEl) return;
+    const t = transformRef.current;
+    const k = t.k;
+    const zoomedIn = k >= LOD_SHOW_LABELS;
+    const pinned = pinnedLabelIdsRef.current;
+    const candidates = nodesRef.current
+      // Zoomed out: only connected hubs compete for the few label slots.
+      .filter((n) => zoomedIn || pinned.has(n.id) || (n.degree ?? 0) > 0)
+      .map((n) => ({
+        id: n.id,
+        x: t.applyX(n.x ?? 0),
+        y: t.applyY(n.y ?? 0),
+        text: labelText(n),
+        priority: n.degree ?? 0,
+        pinned: pinned.has(n.id),
+        offsetX: radiusFor(n) * k + 3,
+      }));
+    const shown = cullLabels(
+      candidates,
+      { width: svgEl.clientWidth || 900, height: svgEl.clientHeight || 600 },
+      {
+        charWidth: LABEL_FONT_PX * 0.6,
+        lineHeight: LABEL_FONT_PX + 2,
+        // Zoomed out: label just the top hubs (by degree) for orientation;
+        // zoomed in: every label that fits without overlapping.
+        maxLabels: zoomedIn ? undefined : LOD_HUB_LABELS,
+      },
+    );
+    select(svgEl)
+      .select("g.labels")
+      .selectAll<SVGTextElement, SimNode>("text")
+      .attr("font-size", LABEL_FONT_PX / k)
+      .attr("stroke-width", 3 / k)
+      .attr("dx", (d) => radiusFor(d) + 3 / k)
+      .attr("dy", (LABEL_FONT_PX * 0.35) / k)
+      .style("display", (d) => (shown.has(d.id) ? null : "none"));
+  }
+
+  /** Zoom so every node is in view, centred in the current SVG size. */
+  function fitView(): void {
+    const svgEl = svgRef.current;
+    const zoomBehaviour = zoomRef.current;
+    if (!svgEl || !zoomBehaviour) return;
+    const fit = fitTransform(nodesRef.current, {
+      width: svgEl.clientWidth,
+      height: svgEl.clientHeight,
+    }, { maxScale: 1.6 });
+    if (!fit) return;
+    select(svgEl).call(
+      zoomBehaviour.transform as never,
+      zoomIdentity.translate(fit.x, fit.y).scale(fit.k),
+    );
+  }
+
+  // Hovered / selected labels are always shown (pinned) regardless of zoom.
+  useEffect(() => {
+    const ids = new Set<string>();
+    if (hovered) ids.add(hovered.id);
+    if (selected) ids.add(selected.id);
+    pinnedLabelIdsRef.current = ids;
+    refreshLabels();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hovered, selected]);
+
+  // Re-fit when the canvas resizes (filter pane collapse/expand, detail
+  // panel, window resize) so the graph re-centres in the new space.
+  useEffect(() => {
+    const svgEl = svgRef.current;
+    if (!svgEl || typeof ResizeObserver === "undefined") return;
+    let last = { w: svgEl.clientWidth, h: svgEl.clientHeight };
+    let timer: number | undefined;
+    const ro = new ResizeObserver(() => {
+      const w = svgEl.clientWidth;
+      const h = svgEl.clientHeight;
+      if (w === last.w && h === last.h) return;
+      last = { w, h };
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        fitView();
+        refreshLabels();
+      }, 80);
+    });
+    ro.observe(svgEl);
+    return () => {
+      window.clearTimeout(timer);
+      ro.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layoutMode]);
 
   // Apply LOD on zoom changes — toggle classes / opacity instead of rebuilding
   // the SVG structure each tick.
   useEffect(() => {
     if (!svgRef.current) return;
     const svg = select(svgRef.current);
-
-    // Hide labels at low zoom; show at high zoom.
-    svg
-      .select("g.labels")
-      .style("display", zoomScale >= LOD_SHOW_LABELS ? "block" : "none");
 
     // Drop low-weight edges when zoomed out so the graph reads as
     // structure rather than noise.

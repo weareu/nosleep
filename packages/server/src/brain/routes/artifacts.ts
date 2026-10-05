@@ -10,6 +10,7 @@ import {
   readCasBlob,
   CAS_COMPRESSION_MARKER,
 } from "../storage/cas-blobs.js";
+import { isBinaryContentType } from "../ingest/hash.js";
 
 const orgQuery = z.object({
   org_id: z.string().min(1),
@@ -80,12 +81,7 @@ export function registerBrainArtifactRoutes(fastify: FastifyInstance): void {
     const includes = parseIncludes(q.data.include);
 
     // Shape content for response — binary → base64, text → utf8
-    const ct = (row.content_type ?? "").toLowerCase();
-    const isBinary =
-      ct.startsWith("image/") ||
-      ct.startsWith("video/") ||
-      ct.startsWith("audio/") ||
-      ct === "application/octet-stream";
+    const isBinary = isBinaryContentType(row.content_type);
     // CAS resolution: when compression='cas', content column is NULL and
     // the real bytes live in data/brain/<org>/blobs/.
     let resolved: Buffer | null = row.content;

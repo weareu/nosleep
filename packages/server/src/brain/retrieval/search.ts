@@ -21,9 +21,29 @@ import { buildArtifactsWhere } from "./filters.js";
 import { rerank, type RerankCandidate } from "./rerank.js";
 import { planFanout, openFanout, type FanoutHandle } from "./fanout.js";
 import type { SelectedFile } from "../storage/file-selection.js";
+import {
+  findThoughtsLexical,
+  loadThoughtsForSearch,
+} from "../thoughts/search.js";
+import { markThoughtsRecalled } from "../thoughts/recall.js";
+import type { ThoughtRow } from "../thoughts/types.js";
+
+/** Which brain layer a hit came from. */
+export type SearchLayer = "archive" | "thoughts";
+
+export interface SearchResultThought {
+  id: string;
+  thought_type: string | null;
+  visibility: string;
+  topics: string[];
+}
 
 export interface SearchResultRow {
+  /** Artifact hash for archive hits; thought id for thought hits. */
   hash: string;
+  layer: SearchLayer;
+  /** Present only when layer === "thoughts". */
+  thought?: SearchResultThought;
   kind: string;
   ts: number;
   project_id: string;
@@ -74,9 +94,55 @@ function buildSnippet(row: {
   return row.content.toString("utf8").slice(0, 240).replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Archive-only facets (kind/origin/session/actor/numeric) have no meaning on
+ * thoughts; a query that sets any of them is an archive query.
+ */
+function hasArchiveOnlyFilters(q: QuerySpecT): boolean {
+  return (
+    !!q.facets?.kind_prefix?.length ||
+    !!q.facets?.origin ||
+    !!q.facets?.session_id ||
+    !!q.facets?.actor ||
+    (!!q.numeric && Object.keys(q.numeric).length > 0)
+  );
+}
+
+function thoughtToResult(t: ThoughtRow, f: FusedResult, q: QuerySpecT): SearchResultRow {
+  const type = t.thought_type ?? t.metadata.type ?? null;
+  return {
+    hash: t.id,
+    layer: "thoughts",
+    thought: {
+      id: t.id,
+      thought_type: type,
+      visibility: t.visibility,
+      topics: t.metadata.topics ?? [],
+    },
+    kind: `thought/${type ?? "observation"}`,
+    ts: t.created_at,
+    project_id: t.project_id,
+    session_id: null,
+    snippet: t.content.slice(0, 240).replace(/\s+/g, " ").trim(),
+    score: f.fused_score,
+    fused_rank: f.fused_rank,
+    score_breakdown: q.return_score_breakdown ? f.contributions : undefined,
+  };
+}
+
 export async function search(q: QuerySpecT): Promise<SearchResponse> {
   const started = performance.now();
   assertNonEmpty(q);
+  const wantArchive = q.layers.includes("archive");
+  const wantThoughts =
+    q.layers.includes("thoughts") && !hasArchiveOnlyFilters(q);
+  const thoughtScope = {
+    orgId: q.org_id,
+    projectId: q.project_id,
+    scope: q.scope,
+    includeHidden: q.include_hidden,
+    includeArchived: q.include_archived,
+  };
 
   // Decide whether to fan out across sealed files. When the query asks for
   // `time_range: "all_time"` AND there is at least one sealed file in
@@ -99,7 +165,7 @@ export async function search(q: QuerySpecT): Promise<SearchResponse> {
 
     if (q.text?.query) {
       const mode = q.text.mode ?? "hybrid";
-      if (mode === "lexical" || mode === "hybrid") {
+      if (wantArchive && (mode === "lexical" || mode === "hybrid")) {
         retrieverInputs.push({
           retriever: "bm25",
           results: runBm25(db, q, 200, filesForRetriever),
@@ -118,7 +184,34 @@ export async function search(q: QuerySpecT): Promise<SearchResponse> {
       }
     }
 
-    if (q.temporal?.near_artifact) {
+    // Thoughts layer: lexical FTS over distilled thoughts (semantic thought
+    // hits already arrive via semantic_text's vec_text_map join).
+    if (wantThoughts && q.text?.query) {
+      const mode = q.text.mode ?? "hybrid";
+      if (mode === "lexical" || mode === "hybrid") {
+        const hits = findThoughtsLexical(activeDbFor(q.org_id), {
+          ...thoughtScope,
+          query: q.text.query,
+          limit: 200,
+          createdFrom: q.temporal?.from,
+          createdTo: q.temporal?.to,
+        });
+        if (hits.length > 0) {
+          retrieverInputs.push({
+            retriever: "thoughts_bm25",
+            results: hits.map((h, idx) => ({
+              hash: h.row.id,
+              rank: idx + 1,
+              raw_score: h.relevance,
+              retriever: "thoughts_bm25",
+            })),
+            weight: q.text.weight,
+          });
+        }
+      }
+    }
+
+    if (wantArchive && q.temporal?.near_artifact) {
       retrieverInputs.push({
         retriever: "temporal",
         results: runTemporal(db, q, 200),
@@ -129,7 +222,7 @@ export async function search(q: QuerySpecT): Promise<SearchResponse> {
     // Phase 5: code-structural always runs when text is present (cheap —
     // index on code_symbols.symbol). Boosted by intent=find_code; otherwise
     // contributes softly so it doesn't overwhelm semantic on mixed content.
-    if (q.text?.query) {
+    if (wantArchive && q.text?.query) {
       const codeResults = runCodeStructural(db, q, 200);
       if (codeResults.length > 0) {
         const boost = q.intent === "find_code" ? 1.2 : 0.4;
@@ -144,23 +237,41 @@ export async function search(q: QuerySpecT): Promise<SearchResponse> {
     // If no retrievers fired (pure-filter query), do a plain ts-desc scan
     // respecting hard filters.
     let fused: FusedResult[];
-    const totalBefore = retrieverInputs.reduce(
-      (n, r) => n + r.results.length,
-      0,
-    );
+    // Distinct candidates across all retrievers (a hash found by bm25 AND
+    // semantic counts once).
+    const totalBefore = new Set(
+      retrieverInputs.flatMap((r) => r.results.map((x) => x.hash)),
+    ).size;
 
     if (retrieverInputs.length === 0) {
-      fused = runPureFilterScan(db, q, Math.max(q.limit, 100), filesForRetriever);
+      fused = wantArchive
+        ? runPureFilterScan(db, q, Math.max(q.limit, 100), filesForRetriever)
+        : [];
     } else {
       fused = rrf(retrieverInputs, 60, 100);
     }
+
+    const totalCandidates = Math.max(totalBefore, fused.length);
+
+    // Thought hits (lexical or semantic) hydrate from active.db, re-checked
+    // against org/scope/visibility — never trust a retriever's join alone.
+    const thoughts: Map<string, ThoughtRow> = wantThoughts
+      ? loadThoughtsForSearch(
+          activeDbFor(q.org_id),
+          fused.slice(0, 100).map((f) => f.hash),
+          thoughtScope,
+        )
+      : new Map();
 
     // Cross-encoder rerank (no-op unless a provider is installed)
     const candidatesForRerank: RerankCandidate[] = fused
       .slice(0, 100)
       .map((f) => ({
         hash: f.hash,
-        text: snippetForHash(db, f.hash, filesForRetriever) ?? "",
+        text:
+          thoughts.get(f.hash)?.content ??
+          snippetForHash(db, f.hash, filesForRetriever) ??
+          "",
       }));
     const rerankerOutput = await rerank(q.text?.query ?? "", candidatesForRerank);
     if (rerankerOutput) {
@@ -177,9 +288,7 @@ export async function search(q: QuerySpecT): Promise<SearchResponse> {
           rerankedFused.push(f);
         }
       }
-      fused = rerankedFused.slice(0, q.limit);
-    } else {
-      fused = fused.slice(0, q.limit);
+      fused = rerankedFused;
     }
 
     // Hydrate result rows with kind + snippet + ts. Under fan-out, an
@@ -189,14 +298,24 @@ export async function search(q: QuerySpecT): Promise<SearchResponse> {
     const hydrateStmts = buildHydrateStatements(db, filesForRetriever);
 
     for (const f of fused) {
+      if (results.length >= q.limit) break;
+      const thought = thoughts.get(f.hash);
+      if (thought) {
+        results.push(thoughtToResult(thought, f, q));
+        continue;
+      }
+      if (!wantArchive) continue;
       const row = hydrateRow(hydrateStmts, f.hash);
       if (!row) continue;
 
       results.push({
         hash: f.hash,
+        layer: "archive",
         kind: row.kind,
         ts: row.ts,
-        project_id: row.project_id,
+        // Content-addressed artifacts are shared by every project that
+        // ingested them; report the project the caller searched.
+        project_id: q.scope === "project" ? q.project_id : row.project_id,
         session_id: row.session_id,
         snippet: buildSnippet(row),
         score: f.fused_score,
@@ -205,14 +324,19 @@ export async function search(q: QuerySpecT): Promise<SearchResponse> {
       });
     }
 
+    const thoughtIds = results
+      .filter((r) => r.layer === "thoughts")
+      .map((r) => r.hash);
+    markThoughtsRecalled(activeDbFor(q.org_id), thoughtIds);
+
     const response: SearchResponse = {
       query_id: nanoid(),
       latency_ms: performance.now() - started,
-      total_candidates: totalBefore,
+      total_candidates: totalCandidates,
       results,
       layers_returned: {
-        archive: results.length, // Phase 1 is archive-only; thoughts layer lands in Phase 2
-        thoughts: 0,
+        archive: results.length - thoughtIds.length,
+        thoughts: thoughtIds.length,
       },
       intent_used: q.intent ?? null,
       files_queried: fanoutFiles ? fanoutFiles.map((f) => f.file_name) : undefined,
@@ -239,7 +363,6 @@ function runPureFilterScan(
   limit: number,
   files?: SelectedFile[],
 ): FusedResult[] {
-  const where = buildArtifactsWhere(q);
   const fanout = files && files.length > 0 ? files : [
     { alias: "main", path: "", kind: "active" as const, file_name: "active.db", ts_from: null, ts_to: null },
   ];
@@ -247,6 +370,7 @@ function runPureFilterScan(
   const branches: string[] = [];
   const params: (string | number)[] = [];
   for (const f of fanout) {
+    const where = buildArtifactsWhere(q, f.alias);
     branches.push(`
       SELECT a.hash AS hash, a.ts AS ts FROM ${f.alias}.artifacts a
        WHERE ${where.sql}

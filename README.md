@@ -32,15 +32,72 @@ NoSleep is the layer *around* sessions: memory, scheduling, and oversight.
 | | |
 |---|---|
 | **Strategy trees** | Unlimited-depth strategy → goal → task → subtask trees with FS/SS/FF/SF dependencies, priority, acceptance criteria, progress roll-up, and `strategy_next` to pick the next unblocked task. Load plans from markdown with `/nosleep-init`. |
-| **The Brain** | Captures sessions, decisions and thoughts into an org-scoped archive with full-text + vector search (local ONNX embeddings) and a graph view. Agents query it via MCP; the `auto-capture` skill files ACT NOW items at session end. |
+| **The Brain** | Cross-session memory: an archive of everything sessions did, distilled *thoughts* on top, and documents you add yourself. Searchable, explorable as a 2D/3D graph, queryable by agents over MCP. See [The Brain](#the-brain) below. |
 | **Hooks** | Claude Code hooks (pre/post tool, prompt, stop, pre-compact) stream activity to the server for live monitoring, token tracking, drift detection and goal re-injection. Installed per project from the dashboard. |
 | **Loops & schedules** | Per-project auto-loops (`/nosleep-go`, `/nosleep-pause`) and cron schedules, with a no-progress guard and branch auto-stop. |
+| **Coordination** | Running sessions see each other: file locks (`file_lock`/`file_check`), a message board (`session_msg`, `session_inbox`, `session_peers`), redirect/stop, and an escalation queue where agents ask you a question (`request_help`) and you answer from dashboard or phone. |
 | **Org isolation** | Three hard-isolated orgs (projects, memory, alerts, keys never cross). |
 | **Budget pacing** | Billing-cycle-aware daily allowance; NORMAL → LEAN → RESTRICTED → PAUSED. |
 | **Validation** | Haiku-based completeness check + stub heuristics on session exit; auto-retry (max 2) and auto-advance the tree on success. |
 | **Research** | Optional NotebookLM MCP server to offload documentation research to the free Gemini backend. |
 | **Clients** | Web dashboard, macOS menu bar app, iOS/Android app (Expo), `nosleep` CLI wrapper, one `nosleep` MCP tool for agents. |
 | **OpenCode** | Hooks + auto-capture also work in the OpenCode CLI — see [docs/opencode.md](docs/opencode.md). |
+
+## Screenshots
+
+*Demo data.*
+
+| | |
+|---|---|
+| ![Dashboard](docs/images/dashboard.png) | ![Projects](docs/images/projects.png) |
+| **Dashboard:** live sessions across orgs, recent outcomes, alerts and escalations, token use | **Projects:** per-org projects, autonomy level, hooks, launch |
+| ![Strategy tree](docs/images/strategy.png) | ![Brain graph](docs/images/brain-graph.png) |
+| **Strategy:** trees with dependencies, progress roll-up, node detail | **Brain graph:** thoughts, entities and archive as a force/3D graph with Louvain clusters |
+| ![Brain thoughts](docs/images/brain-thoughts.png) | ![Brain hub](docs/images/brain-hub.png) |
+| **Thoughts:** typed, tagged memory with people and topics | **Brain hub:** search, corpus stats, recent thoughts |
+
+<p>
+<img src="docs/images/mobile-dashboard.png" width="240" alt="Mobile dashboard">
+<img src="docs/images/mobile-strategy.png" width="240" alt="Mobile strategy node">
+<img src="docs/images/mobile-brain-capture.png" width="240" alt="Mobile brain capture">
+</p>
+
+**Mobile (iOS/Android):** projects and live sessions, strategy nodes, and Brain capture by text, photo or voice.
+
+## The Brain
+
+Memory that outlives sessions, scoped per org and per project.
+
+**What goes in**
+
+| Source | How |
+|---|---|
+| Sessions | Hooks stream every prompt, assistant turn and tool call into the **archive** automatically (Claude Code + OpenCode) |
+| Documents read by agents | When an agent reads a `.pdf`, `.md` or `.txt`, the file itself is stored as a document |
+| Uploads | **Brain → Capture**: drag & drop or pick PDF, Markdown, text, JSON/YAML/CSV, source code or images (≤10 MB). PDFs are split into searchable pages. API: `POST /api/brain/ingest/file` |
+| Web pages | **Bookmarklet** (Brain → Capture → Bookmarklet) or paste a URL; PDF links are ingested as documents |
+| Thoughts | `capture_thought` (MCP), the web/mobile capture box, the `auto-capture` skill at session end, mobile **voice notes** (on-device transcription) and **photos** |
+
+**What happens to it**
+
+- **Distilling:** documents and sessions are turned into short typed *thoughts* (decision, insight, task, idea, question, …) with topics, people and dates. This runs on your Claude subscription by default, or on a [local/OpenRouter model](docs/deployment.md#local--alternative-models).
+- **Indexing:** full-text plus local vector embeddings (ONNX MiniLM, no API). Code gets symbol extraction; images get EXIF and, if a vision model is configured, caption/OCR.
+- **Linking:** thoughts link to each other (refines / supersedes / related), to the archive they came from, to entities (people, concepts), and to strategy-tree nodes.
+- **Upkeep:** a daily sleep-time pass soft-archives stale and superseded thoughts (reversible), and nightly near-duplicate proposals go to a review queue. See [known issues](docs/known-issues.md#4-memory-rot-at-scale-open-problem) for what this doesn't solve yet.
+
+**Exploring it (web: Brain)**
+
+| View | What it does |
+|---|---|
+| **Graph** | 2D force or **3D** layout (or timeline). Colour by kind, type, project or **Louvain cluster** (3D). Click a node for detail (project, time, topics, people, linked nodes). **Isolate** an N-hop neighbourhood (1–4), hide orphans, filter by edge weight, **time-decay** edges (7–180 days), **K-core** compact view |
+| **Search** | One hybrid (lexical + semantic) search over thoughts **and** the archive, with kind and time filters |
+| **Thoughts** | Typed thoughts with stats by type, topic and person |
+| **Timeline** | Day-by-day swimlanes of what happened in a project |
+| **Archive / Code / Images** | Raw captured artifacts, code with symbols, image gallery |
+| **Compare** | Two artifacts side by side with a line diff |
+| **Admin** | Extractor status, metrics, query logs, event log, merge queue (entities + thought near-duplicates), link suggestions |
+
+**From agents (MCP):** `brain_search`, `brain_thoughts_search`, `brain_thought_get`, `brain_thought_related`, `brain_capture_thought`, `brain_ingest_file` (upload a file from the project), `brain_session_artifacts`, `brain_entities`, … (see [docs/mcp.md](docs/mcp.md#brain)). Sessions launched by NoSleep also get relevant memories injected at start (*recall on launch*).
 
 ## Get running
 

@@ -75,13 +75,17 @@ function spawnWorker(): Worker | null {
     const bundled = bundleWorker();
     const w = new Worker(bundled);
 
-    w.on("message", (msg: { id: number; ok: boolean; result?: unknown; error?: string }) => {
+    w.on("message", (msg: { id: number; ok: boolean; result?: unknown; error?: string; errorName?: string }) => {
       const job = pending.get(msg.id);
       if (!job) return;
       pending.delete(msg.id);
       clearTimeout(job.timer);
       if (msg.ok && msg.result) job.resolve(msg.result);
-      else job.reject(new Error(msg.error ?? "worker ingest failed"));
+      else {
+        const err = new Error(msg.error ?? "worker ingest failed");
+        if (msg.errorName) err.name = msg.errorName;
+        job.reject(err);
+      }
     });
 
     w.on("error", (err: Error) => {
@@ -178,6 +182,38 @@ export async function ingestArtifactsOffThread(
     pending.set(id, { resolve: resolve as (r: unknown) => void, reject, timer });
     worker!.postMessage({ id, kind: "artifacts", items });
   });
+}
+
+const PDF_JOB_TIMEOUT_MS = 2 * 60_000;
+
+/**
+ * Extract PDF text off the main thread (same worker, async job). Returns null
+ * when pdf-parse is unavailable; throws PdfExtractionError on unreadable
+ * input — identical contract to extractPdf. Inline fallback when the worker
+ * is unavailable (and under vitest).
+ */
+export async function extractPdfOffThread(
+  buffer: Buffer,
+): Promise<import("../extractors/pdf-handler.js").PdfExtraction | null> {
+  const { extractPdf, PdfExtractionError } = await import("../extractors/pdf-handler.js");
+  if (!FORCE_INLINE && !worker) worker = spawnWorker();
+  if (FORCE_INLINE || !worker) return extractPdf(buffer);
+
+  const id = ++seq;
+  const result = await new Promise<{ extraction: import("../extractors/pdf-handler.js").PdfExtraction | null }>(
+    (resolve, reject) => {
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`PDF extraction timed out after ${PDF_JOB_TIMEOUT_MS / 60000}m (${buffer.length} bytes)`));
+      }, PDF_JOB_TIMEOUT_MS);
+      pending.set(id, { resolve: resolve as (r: unknown) => void, reject, timer });
+      worker!.postMessage({ id, kind: "pdf", data: new Uint8Array(buffer) });
+    },
+  ).catch((err: Error) => {
+    if (err.name === "PdfExtractionError") throw new PdfExtractionError(err.message);
+    throw err;
+  });
+  return result.extraction;
 }
 
 /** Test hook: tear down the worker between tests. */

@@ -33,6 +33,7 @@ export function BrainArchive(): React.ReactElement {
       scope: projectId && projectId !== ORG_LEVEL ? "project" : "org",
       temporal: defaultTemporal(),
       facets,
+      layers: ["archive"],
       limit: 50,
     })
       .then((r) => setItems(r.results))

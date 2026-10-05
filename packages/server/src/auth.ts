@@ -59,7 +59,7 @@ function isValidApiKey(
 }
 
 /** True when the request originated on this machine (loopback socket). */
-function isLoopback(ip: string | undefined): boolean {
+export function isLoopback(ip: string | undefined): boolean {
   return ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1";
 }
 

@@ -1,26 +1,24 @@
 /**
- * Brain Bookmarklet generator. Lets the user configure server URL, API key,
+ * Brain Bookmarklet generator. Lets the user configure the dashboard URL,
  * org, project, and capture mode, then drags the generated link to their
- * bookmarks bar. Clicking the bookmark on any page POSTs the page's URL to
- * /api/brain/capture-url.
+ * bookmarks bar. Clicking the bookmark on any page opens the dashboard's
+ * /brain/capture page, which POSTs the URL to /api/brain/capture-url.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useOrgProject } from "../../components/OrgProjectPicker";
 
 const DEFAULT_PROJECT = "_org_level";
 
 function defaultServer(): string {
-  // The web app proxies /api → server, but a bookmarklet runs on arbitrary
-  // pages and needs the absolute URL. Default to current origin so dev/local
-  // setups Just Work.
+  // The bookmarklet opens the dashboard (this origin), which proxies /api →
+  // server and already holds the API key.
   if (typeof window !== "undefined") return window.location.origin;
   return "http://localhost:3777";
 }
 
 function buildBookmarklet(args: {
   server: string;
-  apiKey: string;
   orgId: string;
   projectId: string;
   mode: "ref" | "full";
@@ -30,46 +28,30 @@ function buildBookmarklet(args: {
   // generating it for themselves). Strings are JSON-encoded then injected.
   const cfg = JSON.stringify({
     server: args.server.replace(/\/+$/, ""),
-    apiKey: args.apiKey,
     orgId: args.orgId,
     projectId: args.projectId,
     mode: args.mode,
     promptNote: args.promptNote,
   });
 
+  // Opens the dashboard's capture page as a top-level window. A fetch()
+  // from an arbitrary site to this server can never work: the CORS policy
+  // only admits the dashboard's own local origins, Chrome's Private Network
+  // Access blocks public→private requests, and https pages can't call an
+  // http server. Navigation needs none of that — and keeps the API key out
+  // of the bookmark (the dashboard already holds it).
   const fnSource = `(function(){
     var c = ${cfg};
-    var u = location.href;
-    var t = document.title;
     var sel = (window.getSelection && String(window.getSelection())) || "";
     var note = c.promptNote ? prompt("Note (optional):", sel || "") : (sel || "");
-    if (note === null) return; // user cancelled
-    var body = {
-      url: u,
-      org_id: c.orgId,
-      project_id: c.projectId,
-      mode: c.mode,
-      note: note || undefined,
-      tags: ["bookmarklet"]
-    };
-    fetch(c.server + "/api/brain/capture-url", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": c.apiKey
-      },
-      body: JSON.stringify(body)
-    }).then(function(r){
-      if (r.ok) {
-        var n = document.createElement("div");
-        n.textContent = "✓ Captured: " + t;
-        n.style.cssText = "position:fixed;top:12px;right:12px;background:#10b981;color:#fff;padding:10px 14px;border-radius:6px;font:14px sans-serif;z-index:2147483647;box-shadow:0 4px 12px rgba(0,0,0,.3)";
-        document.body.appendChild(n);
-        setTimeout(function(){ n.remove(); }, 2500);
-      } else {
-        r.text().then(function(txt){ alert("Capture failed: " + r.status + " " + txt); });
-      }
-    }).catch(function(e){ alert("Capture error: " + e); });
+    if (note === null) return;
+    var q = "url=" + encodeURIComponent(location.href) +
+      "&org_id=" + encodeURIComponent(c.orgId) +
+      "&project_id=" + encodeURIComponent(c.projectId) +
+      "&mode=" + encodeURIComponent(c.mode) +
+      (note ? "&note=" + encodeURIComponent(note) : "");
+    var w = window.open(c.server + "/brain/capture?" + q, "_blank");
+    if (!w) location.href = c.server + "/brain/capture?" + q;
   })();`;
 
   // Strip indentation + collapse newlines to one line. Avoid stripping
@@ -83,23 +65,28 @@ export function BrainBookmarklet(): React.ReactElement {
   const orgId = scope.orgId;
   const projectId = scope.projectId;
   const [server, setServer] = useState(defaultServer);
-  const [apiKey, setApiKey] = useState("");
   const [mode, setMode] = useState<"ref" | "full">("full");
   const [promptNote, setPromptNote] = useState(true);
   const [copied, setCopied] = useState(false);
 
+  // React 19 replaces any `javascript:` href with a URL that throws
+  // ("React has blocked a javascript: URL…"), so a dragged bookmark never
+  // ran. Set the attribute on the DOM node directly instead.
+  const linkRef = useRef<HTMLAnchorElement | null>(null);
   const bookmarklet = useMemo(
     () =>
       buildBookmarklet({
         server,
-        apiKey,
         orgId,
         projectId,
         mode,
         promptNote,
       }),
-    [server, apiKey, orgId, projectId, mode, promptNote],
+    [server, orgId, projectId, mode, promptNote],
   );
+  useEffect(() => {
+    linkRef.current?.setAttribute("href", bookmarklet);
+  }, [bookmarklet]);
 
   function copy() {
     navigator.clipboard.writeText(bookmarklet).then(
@@ -118,7 +105,7 @@ export function BrainBookmarklet(): React.ReactElement {
       <div>
         <h1 className="text-2xl font-bold">Capture Bookmarklet</h1>
         <p className="text-sm text-slate-400 mt-1">
-          Configure your server, API key, and target project, then drag the
+          Configure the dashboard URL and target project, then drag the
           generated link to your browser's bookmarks bar. Clicking it on any
           page captures that URL into the brain.
         </p>
@@ -127,22 +114,12 @@ export function BrainBookmarklet(): React.ReactElement {
       <section className="bg-slate-800/40 border border-slate-800 rounded-lg p-4 space-y-3">
         <h2 className="text-sm font-semibold">Configuration</h2>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Server URL">
+          <Field label="Dashboard URL">
             <input
               value={server}
               onChange={(e) => setServer(e.target.value)}
               className={inputCls}
               placeholder="http://localhost:3777"
-            />
-          </Field>
-          <Field label="API Key">
-            <input
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              className={inputCls}
-              placeholder="x-api-key value"
-              type="password"
-              autoComplete="off"
             />
           </Field>
           <Field label="Scope">
@@ -188,7 +165,7 @@ export function BrainBookmarklet(): React.ReactElement {
         <h2 className="text-sm font-semibold">Drag this to your bookmarks bar</h2>
         <div className="flex items-center gap-3">
           <a
-            href={bookmarklet}
+            ref={linkRef}
             onClick={(e) => e.preventDefault()}
             draggable
             className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold inline-block"
@@ -221,9 +198,9 @@ export function BrainBookmarklet(): React.ReactElement {
         <h2 className="text-sm font-semibold">Notes</h2>
         <ul className="list-disc list-inside space-y-1 text-slate-400">
           <li>
-            The bookmarklet stores the API key inline. Treat the bookmark like
-            any other secret — anyone with access to your bookmarks bar can
-            read it.
+            The bookmarklet opens this dashboard's Capture page in a new tab;
+            no API key is stored in the bookmark. Allow pop-ups for sites you
+            capture from, or it navigates the current tab instead.
           </li>
           <li>
             For multi-org setups, generate one bookmarklet per org/project and
@@ -232,7 +209,7 @@ export function BrainBookmarklet(): React.ReactElement {
           <li>
             <strong>Ref</strong> stores the URL + og-tags only.{" "}
             <strong>Full</strong> additionally fetches and indexes the article
-            via Readability.
+            via Readability. PDF links are stored with per-page searchable text.
           </li>
           <li>
             If the page has selected text when triggered, the selection is

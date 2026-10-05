@@ -14,6 +14,7 @@ import { listAlerts, acknowledgeAlert, acknowledgeAllAlerts } from "../services/
 import { useRefresh } from "../hooks/useRefresh";
 import { useWsEvent } from "../hooks/useWsEvent";
 import { colors, getOrgColor } from "../theme";
+import { FAB_CONTENT_INSET } from "../components/GlobalMicFab";
 import type { Alert, OrgSlug } from "../types";
 
 type FilterOption = "all" | "org_personal" | "org_wyobi" | "org_apply";
@@ -190,7 +191,8 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   listContent: {
-    paddingBottom: 20,
+    // Clear the floating mic button so the last rows/badges aren't covered.
+    paddingBottom: FAB_CONTENT_INSET,
   },
   emptyText: {
     color: colors.textMuted,

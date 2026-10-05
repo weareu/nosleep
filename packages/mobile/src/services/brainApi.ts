@@ -4,6 +4,7 @@
  */
 
 import { getServerConfig } from "../config";
+import { report as clientLog } from "./clientLog";
 
 async function jsonFetch<T>(
   method: "GET" | "POST",
@@ -15,13 +16,34 @@ async function jsonFetch<T>(
     "Content-Type": "application/json",
   };
   if (cfg.apiKey) headers["x-api-key"] = cfg.apiKey;
-  const res = await fetch(`${cfg.apiUrl}${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  // Brain calls carry uploads (photos, voice) — failures must reach the
+  // server log, not just a transient toast on the phone.
+  const route = path.split("?")[0];
+  let res: Response;
+  try {
+    res = await fetch(`${cfg.apiUrl}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch (err) {
+    clientLog(
+      "error",
+      "brainApi.fetch",
+      err instanceof Error ? err.message : String(err),
+      { method, path: route, apiUrl: cfg.apiUrl, hasKey: Boolean(cfg.apiKey) },
+      err instanceof Error ? err.stack : undefined,
+    );
+    throw err;
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
+    clientLog("warn", "brainApi.http", `${res.status} ${method} ${route}`, {
+      method,
+      path: route,
+      status: res.status,
+      body: text.slice(0, 500),
+    });
     throw new Error(`${method} ${path} → ${res.status}: ${text}`);
   }
   return (await res.json()) as T;
@@ -41,6 +63,14 @@ export interface BrainThought {
   source_kind: string;
   created_at: number;
   updated_at: number;
+}
+
+export async function getThought(
+  id: string,
+  orgId: string,
+): Promise<BrainThought & { project_id: string; visibility: string }> {
+  const qs = new URLSearchParams({ org_id: orgId });
+  return jsonFetch("GET", `/api/brain/thoughts/${encodeURIComponent(id)}?${qs.toString()}`);
 }
 
 export interface CaptureThoughtRequest {
@@ -211,7 +241,15 @@ export async function listImages(params: {
 // ── Phase 9: search ────────────────────────────────────
 
 export interface BrainSearchResult {
+  /** Artifact hash (layer "archive") or thought id (layer "thoughts"). */
   hash: string;
+  layer: "archive" | "thoughts";
+  thought?: {
+    id: string;
+    thought_type: string | null;
+    visibility: string;
+    topics: string[];
+  };
   kind: string;
   ts: number;
   project_id: string;
@@ -238,6 +276,8 @@ export interface BrainSearchSpec {
   facets?: { kind_prefix?: string[] };
   temporal?: { from?: number; to?: number };
   time_range?: "recent" | "all_time";
+  layers?: Array<"archive" | "thoughts">;
+  include_archived?: boolean;
   limit?: number;
 }
 

@@ -20,7 +20,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   captureThought,
@@ -37,10 +37,21 @@ import {
   type VoiceSession,
   type VoiceRecordingResult,
 } from "../services/voice";
-import { colors } from "../theme";
+import { colors, TAB_BAR_HEIGHT } from "../theme";
 import { OrgProjectPicker } from "./OrgProjectPicker";
 
 const LAST_SCOPE_KEY = "@nosleep/mic-fab/last-scope/v1";
+
+const FAB_SIZE = 56;
+/** Gap between the tab bar and the FAB. */
+const FAB_GAP = 14;
+
+/**
+ * Bottom padding a tab screen's scroll content needs so its last rows can
+ * scroll clear of the floating mic button (FAB height + gaps above the tab
+ * bar). Apply to `contentContainerStyle.paddingBottom` of tab-screen lists.
+ */
+export const FAB_CONTENT_INSET = FAB_GAP + FAB_SIZE + 12;
 
 interface PersistedScope {
   orgId: string;
@@ -49,6 +60,10 @@ interface PersistedScope {
 
 export function GlobalMicFab(): React.JSX.Element {
   const [open, setOpen] = useState(false);
+  // Sit just above the tab bar on every device (home-indicator iPhones,
+  // web, Android) instead of a hard-coded offset.
+  const insets = useSafeAreaInsets();
+  const bottom = insets.bottom + TAB_BAR_HEIGHT + FAB_GAP;
 
   return (
     <>
@@ -56,7 +71,7 @@ export function GlobalMicFab(): React.JSX.Element {
         // Long-press opens straight to recording for hands-free use.
         onPress={() => setOpen(true)}
         onLongPress={() => setOpen(true)}
-        style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
+        style={({ pressed }) => [styles.fab, { bottom }, pressed && styles.fabPressed]}
         accessibilityLabel="Quick voice note"
         accessibilityRole="button"
       >
@@ -345,11 +360,9 @@ const styles = StyleSheet.create({
   fab: {
     position: "absolute",
     right: 18,
-    // Sit above the tab bar (≈ 80px tall on iPhones with home indicator).
-    bottom: 96,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: FAB_SIZE,
+    height: FAB_SIZE,
+    borderRadius: FAB_SIZE / 2,
     backgroundColor: "#3b82f6",
     alignItems: "center",
     justifyContent: "center",

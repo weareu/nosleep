@@ -17,6 +17,7 @@ import { wsManager } from "../services/ws";
 import { useRefresh } from "../hooks/useRefresh";
 import { useWsEvent } from "../hooks/useWsEvent";
 import { colors, getOrgColor, ORG_NAMES } from "../theme";
+import { FAB_CONTENT_INSET } from "../components/GlobalMicFab";
 import type { OrgWithStats, SessionWithProject, Project } from "../types";
 
 interface OrgSection {
@@ -457,6 +458,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   listContent: {
-    paddingBottom: 20,
+    // Clear the floating mic button so the last rows/badges aren't covered.
+    paddingBottom: FAB_CONTENT_INSET,
   },
 });

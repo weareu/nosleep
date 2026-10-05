@@ -56,7 +56,9 @@ export const CANONICAL_KINDS: ReadonlySet<string> = new Set([
 
   // document/
   "document/markdown",
+  "document/pdf",
   "document/pdf_excerpt",
+  "document/text",
   "document/web_fetch",
   "document/api_doc_excerpt",
   "document/spec",

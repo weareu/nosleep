@@ -4,6 +4,8 @@
  * from brain schema/storage internals.
  */
 
+import { readBrainFilePayload } from "@nosleep/shared/dist/brain-file.js";
+
 const SERVER_URL = process.env.NOSLEEP_SERVER_URL ?? "http://localhost:3777";
 const API_KEY = process.env.NOSLEEP_API_KEY;
 
@@ -119,6 +121,62 @@ export async function captureUrl(req: {
   thought_type_hint?: string;
 }): Promise<CaptureUrlResponse> {
   return jsonFetch("POST", "/api/brain/capture-url", req);
+}
+
+// ── File upload (same route as web upload) ───────────────
+
+export interface IngestFileResponse {
+  filename: string;
+  kind: string;
+  content_type: string;
+  hash: string;
+  duplicate: boolean;
+  size: number;
+  pages?: Array<{ page: number; hash: string }>;
+  page_count?: number;
+  warnings: string[];
+}
+
+/**
+ * Upload a local file (or inline base64) into the brain through
+ * POST /api/brain/ingest/file. A `path` must resolve inside the project's
+ * registered directory (looked up via the API, org-checked) and the decoded
+ * file must be ≤ 10 MB — enforced client-side before any bytes are sent.
+ */
+export async function ingestFileApi(req: {
+  org_id: string;
+  project_id: string;
+  path?: string;
+  content_base64?: string;
+  filename?: string;
+  content_type?: string;
+}): Promise<IngestFileResponse> {
+  let projectRoot: string | null = null;
+  if (req.path && req.content_base64 === undefined) {
+    const proj = await jsonFetch<{ data?: { org_id?: string; path?: string } }>(
+      "GET",
+      `/api/projects/${encodeURIComponent(req.project_id)}`,
+    );
+    if (proj.data?.org_id !== req.org_id) {
+      throw new Error(`project ${req.project_id} is not in org ${req.org_id}`);
+    }
+    projectRoot = proj.data?.path ?? null;
+  }
+  const payload = readBrainFilePayload({
+    path: req.path,
+    contentBase64: req.content_base64,
+    filename: req.filename,
+    contentType: req.content_type,
+    projectRoot,
+  });
+  return jsonFetch("POST", "/api/brain/ingest/file", {
+    org_id: req.org_id,
+    project_id: req.project_id,
+    filename: payload.filename,
+    content_base64: payload.content_base64,
+    content_type: payload.content_type,
+    origin: { tool: "mcp-brain", actor: "agent" },
+  });
 }
 
 // ── Thoughts layer ────────────────────────────────────────

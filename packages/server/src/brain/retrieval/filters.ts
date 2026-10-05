@@ -14,10 +14,25 @@ export interface WhereClause {
 }
 
 /**
+ * Project-membership predicate for artifact alias `a`. An artifact is
+ * content-addressed and stored ONCE, but every project that ingested it is
+ * recorded in `artifact_projects` (ingest/pipeline.ts) — so identical content
+ * uploaded into a second project is that project's artifact too. Filtering on
+ * `a.project_id` alone (the first ingester) hid it from every later project.
+ *
+ * `schema` qualifies the table under multi-file fan-out (`main`, `s0`, …).
+ */
+export function artifactInProjectSql(schema?: string): string {
+  const t = schema ? `${schema}.artifact_projects` : "artifact_projects";
+  return `(a.project_id = ? OR a.hash IN (SELECT ap.hash FROM ${t} ap WHERE ap.project_id = ?))`;
+}
+
+/**
  * Build the hard-filter WHERE for `artifacts` table.
  * Caller is responsible for prefixing with AND/WHERE as appropriate.
+ * `schema` is the attached-file alias the caller's `a` lives in (fan-out).
  */
-export function buildArtifactsWhere(q: QuerySpecT): WhereClause {
+export function buildArtifactsWhere(q: QuerySpecT, schema?: string): WhereClause {
   const conds: string[] = [];
   const params: (string | number)[] = [];
 
@@ -26,8 +41,8 @@ export function buildArtifactsWhere(q: QuerySpecT): WhereClause {
   params.push(q.org_id);
 
   if (q.scope === "project") {
-    conds.push("a.project_id = ?");
-    params.push(q.project_id);
+    conds.push(artifactInProjectSql(schema));
+    params.push(q.project_id, q.project_id);
   }
 
   // Facets

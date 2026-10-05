@@ -318,3 +318,43 @@ describe("StrategyTreeManager", () => {
     });
   });
 });
+
+describe("StrategyTreeManager progress — one source of truth", () => {
+  it("tree overallProgressPct equals the root node's computed progress (weighted, partial leaves)", () => {
+    const db = createTestDb();
+    const { orgId, projectId } = seedTestData(db);
+    const m = new StrategyTreeManager(db);
+    const root = m.createNode({ projectId, orgId, parentId: null, type: "strategy", title: "R" });
+    const g1 = m.createNode({ projectId, orgId, parentId: root.id, type: "goal", title: "G1", weight: 3 });
+    const g2 = m.createNode({ projectId, orgId, parentId: root.id, type: "goal", title: "G2" });
+    const a = m.createNode({ projectId, orgId, parentId: g1.id, type: "task", title: "a" });
+    m.createNode({ projectId, orgId, parentId: g1.id, type: "task", title: "b" });
+    const c = m.createNode({ projectId, orgId, parentId: g2.id, type: "task", title: "c" });
+    m.createNode({ projectId, orgId, parentId: g2.id, type: "task", title: "d" });
+    m.createNode({ projectId, orgId, parentId: g2.id, type: "task", title: "e" });
+    m.updateStatus(a.id, "completed");
+    m.setProgress(c.id, 60);
+
+    const tree = m.getTree(projectId)!;
+    const rootM = tree.nodes.find((n) => n.id === root.id)!;
+    // Leaf-count ratio would be 1/5 = 20%; the weighted roll-up is
+    // (50*3 + 20*1)/4 = 42.5 → 43. Header and root must agree.
+    expect(rootM.computedProgressPct).toBe(43);
+    expect(tree.overallProgressPct).toBe(rootM.computedProgressPct);
+    // The stored (propagated) root progress agrees too.
+    expect(m.getNodeById(root.id)!.progressPct).toBe(rootM.computedProgressPct);
+  });
+
+  it("a skipped leaf counts as done in both stored and computed progress", () => {
+    const db = createTestDb();
+    const { orgId, projectId } = seedTestData(db);
+    const m = new StrategyTreeManager(db);
+    const root = m.createNode({ projectId, orgId, parentId: null, type: "strategy", title: "R" });
+    const x = m.createNode({ projectId, orgId, parentId: root.id, type: "task", title: "x" });
+    m.createNode({ projectId, orgId, parentId: root.id, type: "task", title: "y" });
+    m.updateStatus(x.id, "skipped");
+    const tree = m.getTree(projectId)!;
+    expect(tree.overallProgressPct).toBe(50);
+    expect(m.getNodeById(root.id)!.progressPct).toBe(50);
+  });
+});

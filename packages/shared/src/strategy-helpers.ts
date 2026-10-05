@@ -54,3 +54,37 @@ export function parseCriteria(raw: string | undefined): readonly string[] {
     return [];
   }
 }
+
+// ── Progress roll-up — the ONE formula for strategy progress ──────────────
+// Used by the server tree manager (stored propagation + computed metrics +
+// tree header) and by mcp-control / mcp-gateway propagation, so every view
+// (web, mobile, MCP) shows the same number.
+
+/** A finished node (completed/skipped) counts as 100% whatever its stored pct. */
+export function effectiveProgressPct(status: string, pct: number): number {
+  return status === "completed" || status === "skipped" ? 100 : pct;
+}
+
+/** Weighted mean of child progress, rounded; weight 0/null counts as 1. */
+export function weightedProgressPct(
+  items: ReadonlyArray<{ readonly pct: number; readonly weight: number | null | undefined }>,
+): number {
+  let total = 0;
+  let sum = 0;
+  for (const it of items) {
+    const w = it.weight || 1;
+    total += w;
+    sum += it.pct * w;
+  }
+  return total > 0 ? Math.round(sum / total) : 0;
+}
+
+/** Parent status derived from its children. */
+export function rolledUpStatus(
+  children: ReadonlyArray<{ readonly status: string }>,
+  avgPct: number,
+): "completed" | "in_progress" | "pending" {
+  if (children.every((c) => c.status === "completed" || c.status === "skipped")) return "completed";
+  if (children.some((c) => c.status === "in_progress") || avgPct > 0) return "in_progress";
+  return "pending";
+}

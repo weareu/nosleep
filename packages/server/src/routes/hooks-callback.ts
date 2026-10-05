@@ -13,6 +13,7 @@ import {
   fromStop,
 } from "../brain/hooks/handlers.js";
 import type { IngestRequestT } from "../brain/ingest/types.js";
+import { ingestReadDocument } from "../brain/hooks/read-document.js";
 
 const preToolSchema = z.object({
   orgId: z.string().optional(),
@@ -254,16 +255,16 @@ export function registerHookCallbackRoutes(
       if (body.orgId && body.toolName) {
         const projectId = projectIdFor(body.sessionId);
         if (projectId) {
-          brainFanOut(
-            fromPostTool({
-              orgId: body.orgId,
-              sessionId: body.sessionId,
-              toolName: body.toolName,
-              toolInput: body.toolInput,
-              toolResult: body.toolResult,
-              projectId,
-            }),
-          );
+          const payload = {
+            orgId: body.orgId,
+            sessionId: body.sessionId,
+            toolName: body.toolName,
+            toolInput: body.toolInput,
+            toolResult: body.toolResult,
+            projectId,
+          };
+          brainFanOut(fromPostTool(payload));
+          void ingestReadDocument(payload, (msg, ctx) => fastify.log.warn(ctx, msg));
         }
       }
 

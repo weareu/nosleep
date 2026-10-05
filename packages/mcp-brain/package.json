@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "@nosleep/shared": "*",
     "zod": "^3.23.0"
   },
   "devDependencies": {

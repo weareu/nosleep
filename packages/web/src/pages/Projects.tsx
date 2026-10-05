@@ -227,29 +227,45 @@ export function Projects(): React.ReactElement {
 
           return (
             <div key={org.id} className="bg-slate-800/50 rounded-xl border border-slate-700/30 overflow-hidden">
-              <button
-                onClick={() => toggleOrg(org.id)}
-                className="w-full px-5 py-3 flex items-center justify-between hover:bg-slate-800/80 transition-colors"
-              >
-                <div className="flex items-center gap-3">
+              {/* Header row: the expand toggle and the org-level "Install
+                  Hooks" action are SIBLING buttons — a <button> inside a
+                  <button> is invalid HTML (React console error) and makes
+                  the inner action unreachable to keyboard/AT users. */}
+              <div className="flex items-center gap-3 hover:bg-slate-800/80 transition-colors">
+                <button
+                  type="button"
+                  onClick={() => toggleOrg(org.id)}
+                  aria-expanded={isExpanded}
+                  aria-controls={`org-projects-${org.id}`}
+                  className="flex-1 min-w-0 pl-5 py-3 flex items-center gap-3 text-left"
+                >
                   <OrgBadge slug={org.slug} name={org.name} color={org.color} size="md" />
                   <span className="text-sm text-slate-500">{orgProjects.length} projects</span>
-                  <HookOrgAction
-                    orgId={org.id}
-                    onInstall={installOrg}
-                    isLoading={hooksLoading}
-                  />
-                </div>
-                <svg
-                  className={`w-4 h-4 text-slate-500 transition-transform ${isExpanded ? "rotate-180" : ""}`}
-                  fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                </button>
+                <HookOrgAction
+                  orgId={org.id}
+                  onInstall={installOrg}
+                  isLoading={hooksLoading}
+                />
+                <button
+                  type="button"
+                  onClick={() => toggleOrg(org.id)}
+                  aria-expanded={isExpanded}
+                  aria-controls={`org-projects-${org.id}`}
+                  aria-label={`${isExpanded ? "Collapse" : "Expand"} ${org.name}`}
+                  className="pl-3 pr-5 py-3"
                 >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
+                  <svg
+                    className={`w-4 h-4 text-slate-500 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                    fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+              </div>
 
               {isExpanded && orgProjects.length > 0 && (
-                <div className="border-t border-slate-700/30">
+                <div id={`org-projects-${org.id}`} className="border-t border-slate-700/30">
                   <table className="w-full">
                     <thead>
                       <tr className="text-xs text-slate-500 uppercase tracking-wider">

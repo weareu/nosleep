@@ -118,48 +118,69 @@ export function BrainSearch(): React.ReactElement {
       {results && (
         <section className="space-y-3">
           <div className="text-sm text-slate-400">
-            {results.results.length} of {results.total_candidates} candidates · {results.latency_ms.toFixed(1)} ms · query {results.query_id}
+            {results.results.length} of {results.total_candidates} candidates
+            {" · "}
+            {results.layers_returned.thoughts} thoughts, {results.layers_returned.archive} artifacts
+            {" · "}
+            {results.latency_ms.toFixed(1)} ms · query {results.query_id}
           </div>
           <ul className="space-y-3">
-            {results.results.map((r) => (
-              <li
-                key={r.hash}
-                className="bg-slate-800/50 border border-slate-700 p-4 rounded-lg"
-              >
-                <div className="flex items-start justify-between mb-2 gap-3">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 text-xs text-slate-400 mb-1">
-                      <span className="font-mono bg-slate-900 px-1.5 py-0.5 rounded">{r.kind}</span>
-                      <span>{new Date(r.ts * 1000).toLocaleString()}</span>
-                      {r.session_id && <span>· session: {r.session_id}</span>}
+            {results.results.map((r) => {
+              const isThought = r.layer === "thoughts";
+              const href = isThought
+                ? `/brain/thought/${encodeURIComponent(r.hash)}?org_id=${orgId}`
+                : `/brain/artifact/${r.hash}?org_id=${orgId}`;
+              return (
+                <li
+                  key={`${r.layer}:${r.hash}`}
+                  className={`bg-slate-800/50 border p-4 rounded-lg ${
+                    isThought ? "border-violet-700/60" : "border-slate-700"
+                  }`}
+                >
+                  <div className="flex items-start justify-between mb-2 gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 text-xs text-slate-400 mb-1 flex-wrap">
+                        {isThought ? (
+                          <span className="bg-violet-900/50 text-violet-200 px-1.5 py-0.5 rounded">
+                            thought · {r.thought?.thought_type ?? "observation"}
+                          </span>
+                        ) : (
+                          <span className="font-mono bg-slate-900 px-1.5 py-0.5 rounded">{r.kind}</span>
+                        )}
+                        <span>{new Date(r.ts * 1000).toLocaleString()}</span>
+                        {r.session_id && <span>· session: {r.session_id}</span>}
+                        {isThought && r.thought?.visibility && r.thought.visibility !== "active" && (
+                          <span>· {r.thought.visibility}</span>
+                        )}
+                      </div>
+                      <Link
+                        to={href}
+                        className="text-sm text-slate-200 hover:text-blue-400 font-mono break-all"
+                      >
+                        {isThought ? "Open thought →" : `${r.hash.slice(0, 16)}…`}
+                      </Link>
                     </div>
-                    <Link
-                      to={`/brain/artifact/${r.hash}?org_id=${orgId}`}
-                      className="text-sm text-slate-200 hover:text-blue-400 font-mono break-all"
-                    >
-                      {r.hash.slice(0, 16)}…
-                    </Link>
+                    <div className="text-right text-xs text-slate-400 shrink-0">
+                      <div>score: {r.score.toFixed(4)}</div>
+                      <div>rank: {r.fused_rank}</div>
+                    </div>
                   </div>
-                  <div className="text-right text-xs text-slate-400 shrink-0">
-                    <div>score: {r.score.toFixed(4)}</div>
-                    <div>rank: {r.fused_rank}</div>
-                  </div>
-                </div>
-                <p className="text-sm text-slate-300 line-clamp-3">
-                  <SmartSnippet text={r.snippet} />
-                </p>
-                {r.score_breakdown && (
-                  <details className="mt-2 text-xs text-slate-400">
-                    <summary className="cursor-pointer hover:text-slate-200">
-                      score breakdown
-                    </summary>
-                    <pre className="mt-2 overflow-x-auto">
-                      {JSON.stringify(r.score_breakdown, null, 2)}
-                    </pre>
-                  </details>
-                )}
-              </li>
-            ))}
+                  <p className="text-sm text-slate-300 line-clamp-3">
+                    <SmartSnippet text={r.snippet} />
+                  </p>
+                  {r.score_breakdown && (
+                    <details className="mt-2 text-xs text-slate-400">
+                      <summary className="cursor-pointer hover:text-slate-200">
+                        score breakdown
+                      </summary>
+                      <pre className="mt-2 overflow-x-auto">
+                        {JSON.stringify(r.score_breakdown, null, 2)}
+                      </pre>
+                    </details>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}

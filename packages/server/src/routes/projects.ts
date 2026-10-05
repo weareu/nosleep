@@ -6,7 +6,7 @@ import path from "node:path";
 import os from "node:os";
 import { realpathSync, existsSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { DEFAULT_ITERATION_STEPS, type IterationStep } from "@nosleep/shared";
+import { DEFAULT_ITERATION_STEPS, projectLiveStatusSql, type IterationStep } from "@nosleep/shared";
 
 function ensureProjectPath(rawPath: string): { error?: string; created?: boolean } {
   const resolved = path.resolve(rawPath);
@@ -86,6 +86,14 @@ const updateProjectSchema = z.object({
   active: z.boolean().optional(),
 });
 
+type LiveStatusRow = Record<string, unknown> & { live_status: string };
+
+/** Replace the stored status with the session-derived one (see projectLiveStatusSql). */
+function withLiveStatus(row: LiveStatusRow): Record<string, unknown> {
+  const { live_status, ...rest } = row;
+  return { ...rest, status: live_status };
+}
+
 export function registerProjectRoutes(
   fastify: FastifyInstance,
   db: Database.Database,
@@ -95,7 +103,8 @@ export function registerProjectRoutes(
     const { orgId } = request.query as { orgId?: string };
 
     let sql = `
-      SELECT p.*, o.name as org_name, o.slug as org_slug, o.color as org_color,
+      SELECT p.*, ${projectLiveStatusSql("p")} as live_status,
+        o.name as org_name, o.slug as org_slug, o.color as org_color,
         a.name as account_name, a.type as account_type,
         COALESCE((SELECT sn.progress_pct FROM strategy_nodes sn WHERE sn.project_id = p.id AND sn.parent_id IS NULL LIMIT 1), 0) as progress_pct
       FROM projects p
@@ -111,7 +120,7 @@ export function registerProjectRoutes(
 
     sql += ` ORDER BY o.slug, p.name`;
 
-    const rows = db.prepare(sql).all(...params);
+    const rows = (db.prepare(sql).all(...params) as LiveStatusRow[]).map(withLiveStatus);
     return { success: true, data: rows };
   });
 
@@ -119,11 +128,12 @@ export function registerProjectRoutes(
   fastify.get("/api/projects/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
     const row = db.prepare(`
-      SELECT p.*, o.name as org_name, o.slug as org_slug, o.color as org_color
+      SELECT p.*, ${projectLiveStatusSql("p")} as live_status,
+        o.name as org_name, o.slug as org_slug, o.color as org_color
       FROM projects p
       JOIN organizations o ON p.org_id = o.id
       WHERE p.id = ?
-    `).get(id);
+    `).get(id) as LiveStatusRow | undefined;
 
     if (!row) {
       return reply.status(404).send({ success: false, error: "Project not found" });
@@ -134,7 +144,7 @@ export function registerProjectRoutes(
       SELECT * FROM sessions WHERE project_id = ? ORDER BY started_at DESC LIMIT 10
     `).all(id);
 
-    return { success: true, data: { ...row as object, recentSessions: sessions } };
+    return { success: true, data: { ...withLiveStatus(row), recentSessions: sessions } };
   });
 
   // Create a project

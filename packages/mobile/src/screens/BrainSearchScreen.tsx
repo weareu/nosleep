@@ -1,6 +1,7 @@
 /**
  * Mobile brain search tab — hybrid lexical+semantic search across the brain.
- * Tap a result to open the artifact view. Long-press → copy hash.
+ * Results merge archive artifacts and distilled thoughts; tap a hit to open
+ * the artifact or thought view.
  */
 
 import React, { useState } from "react";
@@ -25,6 +26,7 @@ import {
 } from "../services/brainApi";
 import { colors } from "../theme";
 import { OrgProjectPicker } from "../components/OrgProjectPicker";
+import { FAB_CONTENT_INSET } from "../components/GlobalMicFab";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 
 const DEFAULT_ORG = "org_personal";
@@ -141,7 +143,7 @@ export function BrainSearchScreen(): React.JSX.Element {
       <FlatList
         data={items}
         keyExtractor={(r) => r.hash}
-        contentContainerStyle={{ padding: 12, gap: 8 }}
+        contentContainerStyle={{ padding: 12, gap: 8, paddingBottom: FAB_CONTENT_INSET }}
         ListEmptyComponent={
           !loading && !err ? (
             <Text style={styles.empty}>
@@ -153,16 +155,23 @@ export function BrainSearchScreen(): React.JSX.Element {
         }
         renderItem={({ item }) => (
           <Pressable
-            style={styles.resultCard}
+            style={[styles.resultCard, item.layer === "thoughts" && styles.thoughtCard]}
+            accessibilityRole="button"
+            accessibilityLabel={item.layer === "thoughts" ? "Open thought" : "Open artifact"}
             onPress={() =>
-              navigation.navigate("BrainArtifact", {
-                hash: item.hash,
-                orgId,
-              })
+              item.layer === "thoughts"
+                ? navigation.navigate("BrainThought", { id: item.hash, orgId })
+                : navigation.navigate("BrainArtifact", { hash: item.hash, orgId })
             }
           >
             <View style={styles.resultHeader}>
-              <Text style={styles.resultKind}>{item.kind}</Text>
+              {item.layer === "thoughts" ? (
+                <Text style={styles.thoughtBadge}>
+                  thought · {item.thought?.thought_type ?? "observation"}
+                </Text>
+              ) : (
+                <Text style={styles.resultKind}>{item.kind}</Text>
+              )}
               <Text style={styles.resultTs}>{fmtDate(item.ts)}</Text>
             </View>
             <Text numberOfLines={3} style={styles.resultSnippet}>
@@ -236,6 +245,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 12,
   },
+  thoughtCard: { borderColor: "rgba(139,92,246,0.5)" },
+  thoughtBadge: { color: "#c4b5fd", fontSize: 12, fontWeight: "600" },
   resultHeader: {
     flexDirection: "row",
     justifyContent: "space-between",

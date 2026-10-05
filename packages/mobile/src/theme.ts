@@ -45,6 +45,14 @@ export const colors = {
   transparent: "transparent",
 } as const;
 
+/**
+ * Bottom tab bar height ABOVE the safe-area inset. Tall enough for the
+ * 24px icon + a 14px label line + item padding — react-navigation's 49px
+ * default squeezed the label box to 10px and clipped descenders
+ * ("Proiects"). The floating mic button positions itself from this too.
+ */
+export const TAB_BAR_HEIGHT = 58;
+
 export const ORG_COLORS: Record<string, string> = {
   org_personal: colors.personal,
   org_wyobi: colors.wyobi,

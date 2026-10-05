@@ -84,6 +84,7 @@ export function BrainTimeline(): React.ReactElement {
         // every other project's artifacts).
         scope: projectId && projectId !== ORG_LEVEL ? "project" : "org",
         limit: 200,
+        layers: ["archive"],
         time_range: allTime ? "all_time" : "recent",
         temporal: {
           from: tsFrom ?? fallback.from,

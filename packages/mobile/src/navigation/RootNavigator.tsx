@@ -8,6 +8,7 @@ import { StrategyNodeScreen } from "../screens/StrategyNodeScreen";
 import { TerminalScreen } from "../screens/TerminalScreen";
 import { BrainArtifactScreen } from "../screens/BrainArtifactScreen";
 import { BrainSessionScreen } from "../screens/BrainSessionScreen";
+import { BrainThoughtScreen } from "../screens/BrainThoughtScreen";
 import { colors } from "../theme";
 
 export type RootStackParamList = {
@@ -18,6 +19,7 @@ export type RootStackParamList = {
   Terminal: { sessionId: string; projectName: string; orgId?: string };
   BrainArtifact: { hash: string; orgId: string };
   BrainSession: { sessionId: string; orgId: string };
+  BrainThought: { id: string; orgId: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -86,6 +88,11 @@ export function RootNavigator(): React.JSX.Element {
           name="BrainSession"
           component={BrainSessionScreen as any}
           options={{ title: "Brain Session", headerBackTitle: "Back" }}
+        />
+        <Stack.Screen
+          name="BrainThought"
+          component={BrainThoughtScreen as any}
+          options={{ title: "Thought", headerBackTitle: "Back" }}
         />
       </Stack.Navigator>
     </NavigationContainer>

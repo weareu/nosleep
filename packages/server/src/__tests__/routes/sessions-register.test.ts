@@ -3,6 +3,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import type Database from "better-sqlite3";
 import { createTestDb, seedMultiOrg } from "../helpers/db.js";
 import { registerSessionRoutes } from "../../routes/sessions.js";
+import { registerProjectRoutes } from "../../routes/projects.js";
 import type { SessionManager } from "../../orchestrator/session-manager.js";
 import type { SupervisionLoop } from "../../orchestrator/supervision-loop.js";
 import type { BudgetPacer } from "../../budget/budget-pacer.js";
@@ -149,5 +150,64 @@ describe("GET /api/sessions — live sessions must not fall out of the window", 
     const ids = body.data.map((r) => r.id);
     expect(ids).toContain("manual_old_alive");
     expect(ids[0]).toBe("manual_old_alive"); // live rows sort first
+  });
+});
+
+describe("project status is derived from live sessions (web + mobile read /api/projects)", () => {
+  let db: Database.Database;
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    db = createTestDb();
+    seedMultiOrg(db);
+    app = Fastify({ logger: false });
+    const { sm, sup, pacer } = deps();
+    registerSessionRoutes(app, db, sm, sup, pacer);
+    registerProjectRoutes(app, db);
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    db.close();
+  });
+
+  async function statusOf(projectId: string): Promise<{ list: string; one: string }> {
+    const list = (await app.inject({ method: "GET", url: "/api/projects" })).json() as {
+      data: Array<{ id: string; status: string }>;
+    };
+    const one = (await app.inject({ method: "GET", url: `/api/projects/${projectId}` })).json() as {
+      data: { status: string };
+    };
+    return { list: list.data.find((p) => p.id === projectId)!.status, one: one.data.status };
+  }
+
+  it("a hook-registered session makes its project Running; ending the last one returns it to Idle", async () => {
+    expect(await statusOf("proj_personal_001")).toEqual({ list: "idle", one: "idle" });
+
+    await register(app, { orgId: "org_personal", projectPath: "/tmp/personal", claudeSessionId: "live1" });
+    // A second concurrent session (orchestrator-launched) in the same project.
+    db.prepare(
+      `INSERT INTO sessions (id, project_id, org_id, account_id, status, goal_text, goal_hash, claude_session_id)
+       VALUES ('sess_live2', 'proj_personal_001', 'org_personal', 'acc_personal_max', 'running', 'g', 'h', 'live2')`,
+    ).run();
+    expect(await statusOf("proj_personal_001")).toEqual({ list: "running", one: "running" });
+
+    // One of two sessions ends — the project is still running.
+    db.prepare(`UPDATE sessions SET status='completed' WHERE claude_session_id='live1'`).run();
+    expect((await statusOf("proj_personal_001")).list).toBe("running");
+
+    // A session waiting on the user is still live work (same set the org
+    // "N running" badge counts).
+    db.prepare(`UPDATE sessions SET status='waiting_input' WHERE claude_session_id='live2'`).run();
+    expect((await statusOf("proj_personal_001")).list).toBe("running");
+
+    db.prepare(`UPDATE sessions SET status='stopped' WHERE claude_session_id='live2'`).run();
+    expect(await statusOf("proj_personal_001")).toEqual({ list: "idle", one: "idle" });
+  });
+
+  it("a stale stored 'running' with no live session reads as idle", async () => {
+    db.prepare(`UPDATE projects SET status='running' WHERE id='proj_wyobi_001'`).run();
+    expect((await statusOf("proj_wyobi_001")).list).toBe("idle");
   });
 });

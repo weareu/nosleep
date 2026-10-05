@@ -16,7 +16,8 @@ import { MoreScreen } from "../screens/MoreScreen";
 import { listAlerts } from "../services/api";
 import { wsManager } from "../services/ws";
 import { useWsEvent } from "../hooks/useWsEvent";
-import { colors } from "../theme";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { colors, TAB_BAR_HEIGHT } from "../theme";
 
 type TabParamList = {
   Dashboard: undefined;
@@ -83,6 +84,7 @@ function MoreStackNavigator(): React.JSX.Element {
 }
 
 export function TabNavigator(): React.JSX.Element {
+  const insets = useSafeAreaInsets();
   const [unackedCount, setUnackedCount] = useState(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -146,10 +148,13 @@ export function TabNavigator(): React.JSX.Element {
           backgroundColor: colors.card,
           borderTopColor: colors.cardBorder,
           borderTopWidth: 1,
+          height: TAB_BAR_HEIGHT + insets.bottom,
         },
         // 5 main tabs with labels: Dashboard · Projects · Brain · Alerts · More.
         // Strategy / Schedules / Tokens / Metrics / Settings live under More.
-        tabBarLabelStyle: { fontSize: 10, fontWeight: "600" },
+        // Explicit 14px line box (with TAB_BAR_HEIGHT leaving room for it):
+        // the squeezed default clipped the "j" in "Projects" ("Proiects").
+        tabBarLabelStyle: { fontSize: 10, lineHeight: 14, fontWeight: "600" },
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textMuted,
         headerShown: false,

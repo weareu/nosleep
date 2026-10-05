@@ -11,6 +11,7 @@ import { fetchRef, normaliseUrl } from "../extractors/url-fetcher-ref.js";
 import { captureUrlFull } from "../extractors/url-fetcher-full.js";
 import { captureThought } from "../thoughts/capture.js";
 import { ThoughtType } from "../thoughts/types.js";
+import { assertOrgMatches } from "../../auth.js";
 
 const body = z.object({
   url: z.string().url(),
@@ -33,11 +34,15 @@ export function registerBrainCaptureUrlRoutes(
       });
     }
     const req = parsed.data;
+    // Cross-org binding, same as /api/brain/ingest (was missing here).
+    if (!assertOrgMatches(request, reply, req.org_id)) return;
+    const ctx = { url: req.url, org_id: req.org_id, project_id: req.project_id, mode: req.mode };
 
     const refResult = await captureRef(req);
     let fetchHash: string | null = null;
     let fetchError: string | null = null;
     let articleLength = 0;
+    let pages: Array<{ page: number; hash: string }> | undefined;
 
     if (req.mode === "full") {
       const fullResult = await captureUrlFull({
@@ -46,10 +51,16 @@ export function registerBrainCaptureUrlRoutes(
         project_id: req.project_id,
         link_hash: refResult.link_hash,
         tags: req.tags,
+        distill: true,
+        onWarn: (msg, err) => fastify.log.warn({ err, ...ctx }, msg),
       });
       fetchHash = fullResult.fetch_hash;
       fetchError = fullResult.error;
       articleLength = fullResult.article_length;
+      pages = fullResult.pages;
+      if (fetchError) {
+        fastify.log.warn({ ...ctx, fetch_error: fetchError, fetch_hash: fetchHash }, "brain capture-url: full fetch incomplete");
+      }
     }
 
     // If caller provided a note, capture it as a thought with bridge refs
@@ -72,8 +83,9 @@ export function registerBrainCaptureUrlRoutes(
           thought_type_hint: req.thought_type_hint,
         });
         thoughtId = thought.id;
-      } catch {
-        /* non-fatal — note capture failure shouldn't sink the URL capture */
+      } catch (err) {
+        // Non-fatal — the URL capture still stands — but never silent.
+        fastify.log.warn({ err, ...ctx }, "brain capture-url: note thought capture failed");
       }
     }
 
@@ -86,6 +98,7 @@ export function registerBrainCaptureUrlRoutes(
       response.article_length = articleLength;
       response.fetch_enqueued = fetchHash !== null;
       response.fetch_error = fetchError;
+      if (pages) response.pages = pages;
     }
     reply.status(202).send(response);
   });

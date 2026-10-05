@@ -9,6 +9,11 @@ import type {
   NodeDependency,
   DependencyType,
 } from "@nosleep/shared";
+import {
+  effectiveProgressPct,
+  propagateStrategyProgress,
+  weightedProgressPct,
+} from "@nosleep/shared";
 import { eventBus } from "../event-bus.js";
 
 interface CreateNodeParams {
@@ -348,13 +353,19 @@ export class StrategyTreeManager {
       (n) => this.isLeaf(n.id, enriched) && (n.status === "completed" || n.status === "skipped"),
     ).length;
 
+    // ONE progress number per tree: the same weighted roll-up the node
+    // metrics use (computeMetrics), so the tree header and the root node can
+    // never disagree. (Previously the header used completedLeaves/totalLeaves,
+    // which ignores partial leaf progress and weights — e.g. 36% vs 41%.)
+    const tops = enriched.filter((n) => n.parentId === null);
+
     return {
       root,
       nodes: enriched,
       totalNodes: enriched.length,
       totalLeaves,
       completedLeaves,
-      overallProgressPct: totalLeaves > 0 ? Math.round((completedLeaves / totalLeaves) * 100) : 0,
+      overallProgressPct: weightedProgressPct(tops.map((n) => ({ pct: n.computedProgressPct, weight: n.weight }))),
     };
   }
 
@@ -584,40 +595,7 @@ export class StrategyTreeManager {
   // ── Progress propagation ──────────────────────────────
 
   private propagateProgress(parentId: string | null): void {
-    if (!parentId) return;
-
-    const children = this.db.prepare(`
-      SELECT status, progress_pct, weight FROM strategy_nodes WHERE parent_id = ?
-    `).all(parentId) as Array<{ status: string; progress_pct: number; weight: number }>;
-
-    if (children.length === 0) return;
-
-    // Weight-based progress: each child's contribution is proportional to its weight
-    const totalWeight = children.reduce((sum, c) => sum + (c.weight || 1), 0);
-    const weightedProgress = children.reduce(
-      (sum, c) => sum + c.progress_pct * (c.weight || 1),
-      0,
-    );
-    const avgProgress = totalWeight > 0 ? Math.round(weightedProgress / totalWeight) : 0;
-
-    const allDone = children.every((c) => c.status === "completed" || c.status === "skipped");
-    const anyActive = children.some((c) => c.status === "in_progress");
-
-    let status: StrategyNodeStatus;
-    if (allDone) status = "completed";
-    else if (anyActive || avgProgress > 0) status = "in_progress";
-    else status = "pending";
-
-    this.db.prepare(`
-      UPDATE strategy_nodes
-      SET progress_pct = ?, status = ?, updated_at = datetime('now')
-      WHERE id = ?
-    `).run(avgProgress, status, parentId);
-
-    const parent = this.getNodeById(parentId);
-    if (parent?.parentId) {
-      this.propagateProgress(parent.parentId);
-    }
+    propagateStrategyProgress(this.db, parentId);
   }
 
   // ── Metrics computation ───────────────────────────────
@@ -647,7 +625,7 @@ export class StrategyTreeManager {
           activeLeaves: node.status === "in_progress" ? 1 : 0,
           blockedLeaves: node.status === "blocked" ? 1 : 0,
           maxDepthBelow: 0,
-          computedProgressPct: node.progressPct,
+          computedProgressPct: effectiveProgressPct(node.status, node.progressPct),
         };
         cache.set(node.id, result);
         return result;
@@ -661,14 +639,9 @@ export class StrategyTreeManager {
       const maxDepthBelow = Math.max(...childMetrics.map((m) => m.maxDepthBelow)) + 1;
 
       // Weight-based progress: use child weights for proportional calculation
-      const totalWeight = children.reduce((s, c) => s + (c.weight || 1), 0);
-      const weightedCompleted = childMetrics.reduce(
-        (s, m, i) => s + (m.computedProgressPct * (children[i].weight || 1)),
-        0,
+      const computedProgressPct = weightedProgressPct(
+        childMetrics.map((m, i) => ({ pct: m.computedProgressPct, weight: children[i].weight })),
       );
-      const computedProgressPct = totalWeight > 0
-        ? Math.round(weightedCompleted / totalWeight)
-        : 0;
 
       const result: StrategyNodeWithMetrics = {
         ...node,

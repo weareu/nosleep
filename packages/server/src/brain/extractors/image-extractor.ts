@@ -13,6 +13,22 @@ import type Database from "better-sqlite3";
 import { activeDbFor } from "../storage/active-db.js";
 import { isVecLoaded } from "../storage/vec-loader.js";
 import { getImageProviders } from "./image-providers.js";
+import { resolveLlmRoute } from "../../lib/headless-claude.js";
+
+/** Why caption/OCR did or didn't run — stamped on extractor_runs so a
+ *  caption-less image is explainable from the admin dashboard. */
+function visionNote(hasVisionProvider: boolean): string {
+  if (hasVisionProvider) return "vision=on";
+  try {
+    const r = resolveLlmRoute("vision");
+    if (r.provider === "off") return `vision=off (${r.reason})`;
+    return r.provider === "claude"
+      ? "vision=off (claude CLI not available at boot)"
+      : "vision=off (provider not registered)";
+  } catch (err) {
+    return `vision=off (invalid config: ${err instanceof Error ? err.message : String(err)})`;
+  }
+}
 
 export interface ImageExtractTarget {
   hash: string;
@@ -41,7 +57,7 @@ export async function runImageExtraction(
     providers.caption ||
     providers.exif;
   if (!anyProvider) {
-    recordRun(db, target, started, "skipped", "no image providers configured");
+    recordRun(db, target, started, "skipped", `no image providers configured; ${visionNote(false)}`);
     return false;
   }
 
@@ -73,7 +89,17 @@ export async function runImageExtraction(
   ]);
   const ok = results.filter((r) => r.status === "fulfilled").length;
 
-  recordRun(db, target, started, "success", `${ok}/${results.length} subtasks ok`);
+  const failed = results
+    .filter((r): r is PromiseRejectedResult => r.status === "rejected")
+    .map((r) => (r.reason instanceof Error ? r.reason.message : String(r.reason)));
+  recordRun(
+    db,
+    target,
+    started,
+    "success",
+    `${ok}/${results.length} subtasks ok; ${visionNote(Boolean(providers.caption || providers.ocr))}` +
+      (failed.length ? `; errors: ${failed.join(" | ").slice(0, 500)}` : ""),
+  );
   return true;
 }
 

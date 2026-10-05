@@ -16,7 +16,8 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { ingest } from "../ingest/pipeline.js";
 import type { IngestRequestT } from "../ingest/types.js";
-import { assertOrgMatches } from "../../auth.js";
+import { assertOrgMatches, isLoopback } from "../../auth.js";
+import { ingestReadDocument } from "../hooks/read-document.js";
 
 const opencodeBase = {
   org_id: z.string().min(1),
@@ -156,6 +157,30 @@ export function registerBrainOpenCodeRoutes(fastify: FastifyInstance): void {
         if (result.duplicate) dedup += 1;
       } catch (err) {
         errors.push(err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    // Document Reads → document/* artifacts from disk (same path as the
+    // Claude Code post-tool hook). Loopback only: a remote caller must not
+    // be able to make the server read local files.
+    if (isLoopback(request.ip)) {
+      for (const ev of parsed.data.events) {
+        if (ev.type !== "tool_result" && ev.type !== "tool_response") continue;
+        if ((ev.tool_name ?? "").toLowerCase() !== "read") continue;
+        const fp = ev.tool_input?.filePath ?? ev.tool_input?.file_path;
+        if (typeof fp !== "string") continue;
+        void ingestReadDocument(
+          {
+            toolName: "Read",
+            toolInput: { file_path: fp },
+            orgId: ev.org_id,
+            projectId: ev.project_id,
+            sessionId: ev.session_id,
+            toolVersion: ev.tool_version,
+            agent: "opencode",
+          },
+          (msg, ctx) => fastify.log.warn(ctx, msg),
+        );
       }
     }
 

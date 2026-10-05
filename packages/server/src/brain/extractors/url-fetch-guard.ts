@@ -60,6 +60,18 @@ function isPrivateV6(ip: string): boolean {
   return false;
 }
 
+/** NOSLEEP_URL_FETCH_ALLOW_HOSTS — comma-separated hostnames/IPs exempt
+ *  from the private-address block. Read per call so tests can set it. */
+function allowedHosts(): Set<string> {
+  const raw = process.env.NOSLEEP_URL_FETCH_ALLOW_HOSTS ?? "";
+  return new Set(
+    raw
+      .split(",")
+      .map((h) => h.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
 /**
  * Resolve the hostname and assert every result IP is publicly routable.
  * Throws SsrfBlockedError on any private/loopback/link-local/metadata hit.
@@ -78,6 +90,9 @@ export async function assertPublicHost(url: string): Promise<string> {
   }
 
   const host = parsed.hostname;
+  // Operator opt-in for intranet / local sources (and loopback test
+  // fixtures): exact hostname or literal-IP match only, never a range.
+  if (allowedHosts().has(host.toLowerCase().replace(/^\[|\]$/g, ""))) return host;
   // Block literal-IP private targets without DNS lookup.
   if (host.includes(":")) {
     if (isPrivateV6(host)) throw new SsrfBlockedError("private_ipv6", { host });

@@ -7,6 +7,7 @@ import {
   getStrategyNode, listProjectStrategy, listProjectStrategyByDepth,
   getStrategyChildren, getStrategyPath, getNextSortOrder,
   sessionInOrg, listSessionDriftAlerts, listOrgAlerts,
+  projectLiveStatusSql, propagateStrategyProgress,
 } from "@nosleep/shared";
 
 const DB_PATH = process.env.DB_PATH ?? "./data/nosleep.db";
@@ -544,7 +545,7 @@ server.tool(
   {},
   async () => {
     const rows = db.prepare(`
-      SELECT p.id, p.name, p.path, p.status, p.autonomy_level, p.token_budget, p.continue_session,
+      SELECT p.id, p.name, p.path, ${projectLiveStatusSql("p")} as status, p.autonomy_level, p.token_budget, p.continue_session,
         a.name as account_name, a.type as account_type,
         (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.status = 'running') as active_sessions,
         (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id) as total_sessions
@@ -838,24 +839,7 @@ function resolveProjectId(): string | null {
 }
 
 function propagateUp(database: Database.Database, parentId: string | null): void {
-  if (!parentId) return;
-
-  const children = database.prepare(`SELECT status, progress_pct, weight FROM strategy_nodes WHERE parent_id = ?`).all(parentId) as Array<{ status: string; progress_pct: number; weight: number }>;
-  if (children.length === 0) return;
-
-  // Weight-based progress propagation
-  const totalWeight = children.reduce((s, c) => s + (c.weight || 1), 0);
-  const weightedProgress = children.reduce((s, c) => s + c.progress_pct * (c.weight || 1), 0);
-  const avg = totalWeight > 0 ? Math.round(weightedProgress / totalWeight) : 0;
-
-  const allDone = children.every(c => c.status === "completed" || c.status === "skipped");
-  const anyActive = children.some(c => c.status === "in_progress");
-  const status = allDone ? "completed" : (anyActive || avg > 0) ? "in_progress" : "pending";
-
-  database.prepare(`UPDATE strategy_nodes SET progress_pct = ?, status = ?, updated_at = datetime('now') WHERE id = ?`).run(avg, status, parentId);
-
-  const parent = database.prepare(`SELECT parent_id FROM strategy_nodes WHERE id = ?`).get(parentId) as { parent_id: string | null } | undefined;
-  if (parent?.parent_id) propagateUp(database, parent.parent_id);
+  propagateStrategyProgress(database, parentId);
 }
 
 // ── MCP Resources (read-only context, cheaper than tool calls) ──

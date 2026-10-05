@@ -8,7 +8,9 @@ import {
   listSessionDriftAlerts, getSessionBudget,
   listOrgAlerts, acknowledgeAlert, acknowledgeAllOrgAlerts,
   getLoopConfig, upsertLoopConfig, type LoopMode,
+  projectLiveStatusSql, propagateStrategyProgress,
 } from "@nosleep/shared";
+import { readBrainFilePayload } from "@nosleep/shared/dist/brain-file.js";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -81,26 +83,27 @@ function buildHelpers(deps: GatewayDeps) {
     try {
       const res = await fetch(`${serverUrl}${path}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
       const json = await res.json() as Record<string, unknown>;
-      return { ok: res.ok, data: json.data, error: json.error as string | undefined };
+      // Core routes reply with a { success, data, error } envelope; brain
+      // routes (/api/brain/*) reply with the bare object and errors shaped
+      // { error: { code, message } }. Unwrap both, or every brain_* action
+      // reads `data` as undefined ("No results", "Captured thought ?").
+      const enveloped = json !== null && typeof json === "object" && "success" in json;
+      const rawErr = json?.error as unknown;
+      const error = typeof rawErr === "string"
+        ? rawErr
+        : rawErr && typeof rawErr === "object" && "message" in rawErr
+          ? String((rawErr as { message: unknown }).message)
+          : res.ok ? undefined : `HTTP ${res.status}`;
+      return { ok: res.ok, data: enveloped ? json.data : json, error };
     } catch (err) {
       return { ok: false, data: null, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
   function propagateUp(parentId: string | null): void {
-    if (!parentId) return;
-    const children = db.prepare(`SELECT status, progress_pct, weight FROM strategy_nodes WHERE parent_id = ?`).all(parentId) as Array<{ status: string; progress_pct: number; weight: number }>;
-    if (children.length === 0) return;
-    const totalWeight = children.reduce((s, c) => s + (c.weight || 1), 0);
-    const weightedProgress = children.reduce((s, c) => s + c.progress_pct * (c.weight || 1), 0);
-    const avg = totalWeight > 0 ? Math.round(weightedProgress / totalWeight) : 0;
-    const allDone = children.every(c => c.status === "completed" || c.status === "skipped");
-    const anyActive = children.some(c => c.status === "in_progress");
-    const status = allDone ? "completed" : (anyActive || avg > 0) ? "in_progress" : "pending";
-    db.prepare(`UPDATE strategy_nodes SET progress_pct = ?, status = ?, updated_at = datetime('now') WHERE id = ?`).run(avg, status, parentId);
-    const parent = db.prepare(`SELECT parent_id FROM strategy_nodes WHERE id = ?`).get(parentId) as { parent_id: string | null } | undefined;
-    if (parent?.parent_id) propagateUp(parent.parent_id);
+    propagateStrategyProgress(db, parentId);
   }
+
 
   return { orgMap, orgSlugs, resolveOrg, resolveSessionOrg, resolveProjectId, resolveProjectOrg, apiCall, propagateUp };
 }
@@ -666,7 +669,7 @@ export function buildActions(deps: GatewayDeps): Action[] {
   register("project_list", "List all projects in an org", "orgId", async (p) => {
     const org = h.resolveOrg(p.orgId as string);
     if (!org) return "Pass orgId (org_personal, org_wyobi, org_apply).";
-    const rows = db.prepare(`SELECT p.id, p.name, p.path, p.status, p.autonomy_level, p.token_budget, (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.status = 'running') as active FROM projects p WHERE p.org_id = ? ORDER BY p.name`).all(org.id) as Array<Record<string, unknown>>;
+    const rows = db.prepare(`SELECT p.id, p.name, p.path, ${projectLiveStatusSql("p")} as status, p.autonomy_level, p.token_budget, (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.status = 'running') as active FROM projects p WHERE p.org_id = ? ORDER BY p.name`).all(org.id) as Array<Record<string, unknown>>;
     if (rows.length === 0) return `No projects in ${org.name}.`;
     return [`# Projects [${org.name}]`, "", ...rows.map(r => `- **${r.name}** (${r.status}) id:${(r.id as string)}\n  ${r.path} | Budget: ${(r.token_budget as number).toLocaleString("en-US")} | Active: ${r.active}`)].join("\n");
   });
@@ -1245,6 +1248,36 @@ export function buildActions(deps: GatewayDeps): Action[] {
     if (!result.ok) return `Capture failed: ${result.error}`;
     const d = result.data as { id?: string; similar_existing?: unknown[] };
     return `Captured thought ${d?.id ?? "?"}${Array.isArray(d?.similar_existing) && d.similar_existing.length ? ` (${d.similar_existing.length} similar exist)` : ""}.`;
+  });
+
+  register("brain_ingest_file", "Upload a document into the brain archive (PDF, Markdown/text, code, JSON/YAML/CSV, images) via the same pipeline as web upload — dedup, full-text + semantic index, PDF pages, auto-distilled thought. Pass `path` (inside the project's directory; dotfiles refused) OR `contentBase64` + `filename`. Max 10 MB.", "projectId, path? | contentBase64? + filename, contentType?", async (p) => {
+    const pid = p.projectId as string;
+    const orgId = orgForProject(pid);
+    if (!orgId) return "Pass a valid projectId.";
+    const project = db.prepare(`SELECT path FROM projects WHERE id = ?`).get(pid) as { path: string } | undefined;
+    let payload: ReturnType<typeof readBrainFilePayload>;
+    try {
+      payload = readBrainFilePayload({
+        path: p.path === undefined ? undefined : String(p.path),
+        contentBase64: p.contentBase64 === undefined ? undefined : String(p.contentBase64),
+        filename: p.filename === undefined ? undefined : String(p.filename),
+        contentType: p.contentType === undefined ? undefined : String(p.contentType),
+        projectRoot: project?.path && !project.path.startsWith("__adhoc__") ? project.path : null,
+      });
+    } catch (err) {
+      return `Ingest refused: ${err instanceof Error ? err.message : String(err)}`;
+    }
+    const result = await h.apiCall("POST", "/api/brain/ingest/file", {
+      org_id: orgId,
+      project_id: pid,
+      filename: payload.filename,
+      content_base64: payload.content_base64,
+      content_type: payload.content_type,
+      origin: { tool: "mcp-gateway", actor: "agent" },
+    });
+    if (!result.ok) return `Ingest failed: ${result.error}`;
+    const d = result.data as { filename: string; kind: string; size: number; hash: string; duplicate: boolean; page_count?: number };
+    return `${d.duplicate ? "Already in the brain (dedup hit — now linked to this project)" : "Ingested"}: ${d.filename} → ${d.kind} (${d.size} bytes)${d.page_count ? ` · ${d.page_count} page(s)` : ""}\nhash: ${d.hash}`;
   });
 
   register("brain_artifact_get", "Fetch one archive ARTIFACT by hash (with edges + ingest event).", "projectId, hash, include?(csv: edges,ingest_event)", async (p) => {

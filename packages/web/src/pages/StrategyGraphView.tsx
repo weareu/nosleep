@@ -23,7 +23,7 @@ import {
   type SimulationNodeDatum,
   type SimulationLinkDatum,
 } from "d3-force";
-import { zoom as d3zoom, zoomIdentity, type ZoomTransform } from "d3-zoom";
+import { zoom as d3zoom, zoomIdentity, type ZoomBehavior, type ZoomTransform } from "d3-zoom";
 import { drag as d3drag } from "d3-drag";
 import { select } from "d3-selection";
 import {
@@ -40,6 +40,7 @@ import {
   type StrategyGraphEdge,
   type StrategyRefKind,
 } from "../lib/api";
+import { cullLabels, fitTransform } from "../lib/graph-view";
 
 interface SimNode extends StrategyGraphNode, SimulationNodeDatum {
   fx?: number | null;
@@ -67,6 +68,26 @@ const EDGE_COLOUR: Record<string, string> = {
   dependency: "#f59e0b",
   ref: "#3b82f6",
 };
+
+/** Node radius (graph units) by hierarchy level. */
+function radiusFor(type: string): number {
+  if (type === "strategy") return 13;
+  if (type === "goal") return 10;
+  if (type === "task") return 7;
+  return 5;
+}
+
+/** Label priority: higher hierarchy first, then shallower depth. */
+function labelPriority(n: StrategyGraphNode): number {
+  const typeRank = n.type === "strategy" ? 3 : n.type === "goal" ? 2 : n.type === "task" ? 1 : 0;
+  return typeRank * 100 - n.depth;
+}
+
+function labelText(n: StrategyGraphNode): string {
+  return n.title.length > 28 ? n.title.slice(0, 26) + "…" : n.title;
+}
+
+const LABEL_FONT_PX = 11;
 
 // Stable per-project ring colour for visual cluster separation.
 function projectRingColour(projectId: string): string {
@@ -98,6 +119,10 @@ export function StrategyGraphView(): React.ReactElement {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const simRef = useRef<Simulation<SimNode, SimLink> | null>(null);
   const transformRef = useRef<ZoomTransform>(zoomIdentity);
+  const zoomRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  const nodesRef = useRef<SimNode[]>([]);
+  const userMovedViewRef = useRef(false);
+  const selectedIdRef = useRef<string | null>(null);
 
   const { data: orgs } = useQuery<OrgWithStats[]>({
     queryKey: ["orgs"],
@@ -166,10 +191,11 @@ export function StrategyGraphView(): React.ReactElement {
       .force("center", forceCenter<SimNode>(width / 2, height / 2))
       .force(
         "collide",
-        forceCollide<SimNode>().radius(8),
+        forceCollide<SimNode>().radius((d) => radiusFor(d.type) + 6),
       )
       .alphaDecay(0.04);
     simRef.current = sim;
+    nodesRef.current = nodes;
 
     const svg = select(svgRef.current);
     svg.selectAll("*").remove();
@@ -179,9 +205,13 @@ export function StrategyGraphView(): React.ReactElement {
       .scaleExtent([0.15, 5])
       .on("zoom", (event) => {
         transformRef.current = event.transform;
+        if (event.sourceEvent) userMovedViewRef.current = true;
         g.attr("transform", event.transform.toString());
         setZoomScale(event.transform.k);
+        refreshLabels();
       });
+    zoomRef.current = zoomBehaviour;
+    userMovedViewRef.current = false;
     svg.call(zoomBehaviour as never).call(
       (s) => s.call(zoomBehaviour.transform as never, zoomIdentity),
     );
@@ -211,30 +241,32 @@ export function StrategyGraphView(): React.ReactElement {
       .data(nodes)
       .enter()
       .append("circle")
-      .attr("r", (d) => (d.type === "strategy" ? 8 : d.type === "goal" ? 6 : 4))
+      .attr("r", (d) => radiusFor(d.type))
       .attr("fill", (d) => STATUS_FILL[d.status] ?? "#64748b")
       .attr("stroke", (d) => projectRingColour(d.project_id))
-      .attr("stroke-width", 2)
+      .attr("stroke-width", 2.5)
       .style("cursor", "pointer")
       .on("click", (_e, d) => setSelected(d as StrategyGraphNode));
 
-    nodeSel.append("title").text((d) => `${d.title} (${d.project_name})`);
+    nodeSel
+      .append("title")
+      .text((d) => `${d.title} — ${d.status.replace("_", " ")} · ${d.progress_pct}% (${d.project_name})`);
 
-    // Labels — visible only at zoomed-in scales
+    // Labels — collision-culled by hierarchy (strategy > goal > task) at
+    // every zoom; refreshLabels() decides which fit without overlapping.
     const labelSel = g
       .append("g")
       .attr("class", "labels")
       .attr("pointer-events", "none")
-      .style("display", "none")
       .selectAll("text")
       .data(nodes)
       .enter()
       .append("text")
-      .attr("font-size", 10)
-      .attr("fill", "#cbd5e1")
-      .attr("dx", 10)
-      .attr("dy", 3)
-      .text((d) => (d.title.length > 36 ? d.title.slice(0, 34) + "…" : d.title));
+      .attr("fill", "#e2e8f0")
+      .attr("paint-order", "stroke")
+      .attr("stroke", "#0b1220")
+      .style("display", "none")
+      .text((d) => labelText(d));
 
     const dragBehaviour = d3drag<SVGCircleElement, SimNode>()
       .on("start", (event, d) => {
@@ -253,6 +285,7 @@ export function StrategyGraphView(): React.ReactElement {
       });
     nodeSel.call(dragBehaviour as never);
 
+    let tickCount = 0;
     sim.on("tick", () => {
       linkSel
         .attr("x1", (d) => (d.source as SimNode).x ?? 0)
@@ -261,19 +294,98 @@ export function StrategyGraphView(): React.ReactElement {
         .attr("y2", (d) => (d.target as SimNode).y ?? 0);
       nodeSel.attr("cx", (d) => d.x ?? 0).attr("cy", (d) => d.y ?? 0);
       labelSel.attr("x", (d) => d.x ?? 0).attr("y", (d) => d.y ?? 0);
+      if (++tickCount % 8 === 0) {
+        // Keep the whole tree framed while it settles (until the user takes over).
+        if (!userMovedViewRef.current) fitView();
+        refreshLabels();
+      }
+    });
+    sim.on("end", () => {
+      if (!userMovedViewRef.current) fitView();
+      refreshLabels();
     });
 
     return () => {
       sim.stop();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
-  // LOD — show labels when zoomed in.
+  function refreshLabels(): void {
+    const svgEl = svgRef.current;
+    if (!svgEl) return;
+    const t = transformRef.current;
+    const k = t.k;
+    const sel = selectedIdRef.current;
+    const shown = cullLabels(
+      nodesRef.current.map((n) => ({
+        id: n.id,
+        x: t.applyX(n.x ?? 0),
+        y: t.applyY(n.y ?? 0),
+        text: labelText(n),
+        priority: labelPriority(n),
+        pinned: n.id === sel,
+        offsetX: radiusFor(n.type) * k + 4,
+      })),
+      { width: svgEl.clientWidth || 900, height: svgEl.clientHeight || 600 },
+      { charWidth: LABEL_FONT_PX * 0.6, lineHeight: LABEL_FONT_PX + 3 },
+    );
+    select(svgEl)
+      .select("g.labels")
+      .selectAll<SVGTextElement, SimNode>("text")
+      .attr("font-size", LABEL_FONT_PX / k)
+      .attr("stroke-width", 3 / k)
+      .attr("dx", (d) => radiusFor(d.type) + 4 / k)
+      .attr("dy", (LABEL_FONT_PX * 0.35) / k)
+      .style("display", (d) => (shown.has(d.id) ? null : "none"));
+  }
+
+  function fitView(): void {
+    const svgEl = svgRef.current;
+    const zoomBehaviour = zoomRef.current;
+    if (!svgEl || !zoomBehaviour) return;
+    const fit = fitTransform(
+      nodesRef.current,
+      { width: svgEl.clientWidth, height: svgEl.clientHeight },
+      { padding: 60, minScale: 0.15, maxScale: 1.5 },
+    );
+    if (!fit) return;
+    select(svgEl).call(
+      zoomBehaviour.transform as never,
+      zoomIdentity.translate(fit.x, fit.y).scale(fit.k),
+    );
+  }
+
   useEffect(() => {
-    if (!svgRef.current) return;
-    const svg = select(svgRef.current);
-    svg.select("g.labels").style("display", zoomScale >= 1.4 ? "block" : "none");
-  }, [zoomScale]);
+    selectedIdRef.current = selected?.id ?? null;
+    refreshLabels();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
+
+  // Re-fit when the canvas resizes (detail panel opens/closes, window resize).
+  useEffect(() => {
+    const svgEl = svgRef.current;
+    if (!svgEl || typeof ResizeObserver === "undefined") return;
+    let last = { w: svgEl.clientWidth, h: svgEl.clientHeight };
+    let timer: number | undefined;
+    const ro = new ResizeObserver(() => {
+      const w = svgEl.clientWidth;
+      const h = svgEl.clientHeight;
+      if (w === last.w && h === last.h) return;
+      last = { w, h };
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        fitView();
+        refreshLabels();
+      }, 80);
+    });
+    ro.observe(svgEl);
+    return () => {
+      window.clearTimeout(timer);
+      ro.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const refQuery = useQuery({
     queryKey: ["strategy-refs", selected?.id],

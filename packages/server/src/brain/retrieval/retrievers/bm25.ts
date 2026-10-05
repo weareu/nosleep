@@ -50,7 +50,6 @@ export function runBm25(
   if (!q.text?.query) return [];
 
   const ftsQuery = escapeForFts(q.text.query);
-  const where = buildArtifactsWhere(q);
   const fanout = files && files.length > 0 ? files : [
     { alias: "main", path: "", kind: "active" as const, file_name: "active.db", ts_from: null, ts_to: null },
   ];
@@ -72,6 +71,7 @@ export function runBm25(
   // not accept schema-prefixed table names.
   for (const f of fanout) {
     const s = f.alias;
+    const where = buildArtifactsWhere(q, s);
     branches.push(`
       SELECT * FROM (
         SELECT a.hash AS hash, ${s}.artifacts_fts.rank AS bm25_score

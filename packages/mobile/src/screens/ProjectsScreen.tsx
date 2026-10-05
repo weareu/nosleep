@@ -14,6 +14,7 @@ import { StatusDot } from "../components/StatusDot";
 import { listProjects } from "../services/api";
 import { useRefresh } from "../hooks/useRefresh";
 import { colors, getOrgColor, ORG_NAMES } from "../theme";
+import { FAB_CONTENT_INSET } from "../components/GlobalMicFab";
 import type { Project } from "../types";
 
 interface ProjectSection {
@@ -228,7 +229,8 @@ const styles = StyleSheet.create({
     marginLeft: 32,
   },
   listContent: {
-    paddingBottom: 20,
+    // Clear the floating mic button so the last rows/badges aren't covered.
+    paddingBottom: FAB_CONTENT_INSET,
   },
   emptyText: {
     color: colors.textMuted,

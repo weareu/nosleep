@@ -569,18 +569,9 @@ export class SessionManager {
     this.db.prepare(`UPDATE sessions SET status = ?, last_activity_at = datetime('now') WHERE id = ?`)
       .run(status, sessionId);
 
-    // Sync project-level status so the Projects page reflects reality
-    if (active) {
-      const projectStatus = status === "completed" || status === "failed" || status === "stopped"
-        ? "idle"
-        : status === "running" || status === "starting"
-          ? "running"
-          : status === "paused"
-            ? "paused"
-            : "idle";
-      this.db.prepare(`UPDATE projects SET status = ? WHERE id = ?`)
-        .run(projectStatus, active.projectId);
-    }
+    // Project status is derived from sessions on read (projectLiveStatusSql
+    // in @nosleep/shared) — no per-session write-through here, which used to
+    // flip a project "idle" while a second session was still running.
 
     this.emitSessionUpdate(sessionId);
   }

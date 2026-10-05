@@ -162,6 +162,7 @@ docs) and **thoughts** (distilled, linked notes forming a graph).
 | `brain_thought_related` | `projectId`, `thoughtId`, `limit?(10)` | Graph neighbours (refines/supersedes/related) |
 | `brain_thought_stats` | `projectId`, `scope?(project\|org)` | Counts by type, top topics/people |
 | `brain_capture_thought` | `projectId`, `content`, `typeHint?`, `sourceRefs?(json)` | Captured thought id |
+| `brain_ingest_file` | `projectId`, `path?` (inside the project directory; dotfiles refused) or `contentBase64?` + `filename`, `contentType?` | Uploads a document (PDF, Markdown/text, code, data, images; max 10 MB) through `POST /api/brain/ingest/file` — the same pipeline as web upload. The per-org `nosleep-brain-<org>` server exposes the same thing as `ingest_file` |
 | `brain_artifact_get` | `projectId`, `hash`, `include?(edges,ingest_event)` | One archive artifact |
 | `brain_session_artifacts` | `projectId`, `sessionId`, `limit?(100)`, `order?(asc\|desc)` | A session's captured history |
 | `brain_entities` | `projectId`, `kind?`, `order?(ref_count\|name\|recent)`, `limit?(50)` | Extracted people / concepts |

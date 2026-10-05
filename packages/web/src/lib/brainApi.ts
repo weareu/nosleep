@@ -31,7 +31,15 @@ async function jsonFetch<T>(
 }
 
 export interface BrainSearchResult {
+  /** Artifact hash (layer "archive") or thought id (layer "thoughts"). */
   hash: string;
+  layer: "archive" | "thoughts";
+  thought?: {
+    id: string;
+    thought_type: string | null;
+    visibility: string;
+    topics: string[];
+  };
   kind: string;
   ts: number;
   project_id: string;
@@ -61,6 +69,9 @@ export interface BrainQuerySpec {
   scope?: "project" | "org";
   /** "recent" = active.db only (default); "all_time" = fan out to sealed quarters */
   time_range?: "recent" | "all_time";
+  /** Which brain layers to search. Server default: both. */
+  layers?: Array<"archive" | "thoughts">;
+  include_archived?: boolean;
   text?: { query: string; mode?: "lexical" | "semantic" | "hybrid"; weight?: number };
   temporal?: { from?: number; to?: number; near_artifact?: string };
   facets?: {
@@ -150,17 +161,97 @@ export interface BrainCaptureUrlRequest {
   tags?: string[];
 }
 
-export async function brainCaptureUrl(
-  req: BrainCaptureUrlRequest,
-): Promise<{
+export interface BrainCaptureUrlResult {
   link_hash: string;
   normalized_url: string;
   status: number;
   title: string | null;
   og_image: string | null;
   error: string | null;
-}> {
+  thought_id: string | null;
+  /** Full mode only. */
+  fetch_hash?: string | null;
+  article_length?: number;
+  fetch_error?: string | null;
+  /** Full mode, PDF URLs: per-page artifacts. */
+  pages?: Array<{ page: number; hash: string }>;
+}
+
+export async function brainCaptureUrl(
+  req: BrainCaptureUrlRequest,
+): Promise<BrainCaptureUrlResult> {
   return jsonFetch("POST", "/brain/capture-url", req);
+}
+
+// ── Document upload (POST /api/brain/ingest/file) ─────────────────
+
+/** Mirrors the server: decoded file bytes cap (BRAIN_INGEST_MAX_BYTES). */
+export const BRAIN_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+
+/** File-picker `accept` list — keep in sync with server file-ingest.ts. */
+export const BRAIN_UPLOAD_ACCEPT = [
+  ".pdf", ".md", ".markdown", ".txt", ".text", ".log", ".json", ".yaml", ".yml", ".csv",
+  ".ts", ".tsx", ".js", ".mjs", ".cjs", ".jsx", ".py", ".go", ".rs", ".sql", ".sh", ".bash", ".zsh",
+  ".java", ".kt", ".swift", ".rb", ".php", ".c", ".h", ".cc", ".cpp", ".hpp", ".cs",
+  ".css", ".scss", ".html", ".xml", ".toml", ".ini",
+  ".png", ".jpg", ".jpeg", ".gif", ".webp",
+].join(",");
+
+export interface BrainFileIngestResult {
+  filename: string;
+  kind: string;
+  content_type: string;
+  hash: string;
+  duplicate: boolean;
+  size: number;
+  pages?: Array<{ page: number; hash: string }>;
+  page_count?: number;
+  warnings: string[];
+}
+
+export class BrainUploadError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string | null,
+  ) {
+    super(message);
+    this.name = "BrainUploadError";
+  }
+}
+
+export async function ingestBrainFile(args: {
+  filename: string;
+  content_type: string;
+  content_base64: string;
+  org_id: string;
+  project_id: string;
+}): Promise<BrainFileIngestResult> {
+  const res = await fetch(`${BASE_URL}/brain/ingest/file`, {
+    method: "POST",
+    headers: headers(),
+    body: JSON.stringify({
+      ...args,
+      origin: { tool: "nosleep-web", actor: "user" },
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    let message = text || res.statusText;
+    let code: string | null = null;
+    try {
+      const parsed = JSON.parse(text) as { error?: { code?: string; message?: string } | string };
+      if (typeof parsed.error === "string") message = parsed.error;
+      else if (parsed.error?.message) {
+        message = parsed.error.message;
+        code = parsed.error.code ?? null;
+      }
+    } catch {
+      /* non-JSON body (e.g. proxy error page) — keep raw text */
+    }
+    throw new BrainUploadError(`${res.status}: ${message}`, res.status, code);
+  }
+  return (await res.json()) as BrainFileIngestResult;
 }
 
 // ── Thoughts layer ────────────────────────────────────────

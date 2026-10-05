@@ -12,6 +12,7 @@
 
 import type Database from "better-sqlite3";
 import type { StrategyRow } from "./strategy-helpers.js";
+import { effectiveProgressPct, rolledUpStatus, weightedProgressPct } from "./strategy-helpers.js";
 
 // ── Strategy node queries ────────────────────────────────
 
@@ -71,6 +72,31 @@ export function getNextSortOrder(db: Database.Database, parentId: string): numbe
   return row.n;
 }
 
+/**
+ * Recompute `parentId`'s stored progress + status from its children and
+ * recurse to the root. Single implementation for the server tree manager,
+ * mcp-control and mcp-gateway.
+ */
+export function propagateStrategyProgress(db: Database.Database, parentId: string | null): void {
+  let current = parentId;
+  while (current) {
+    const children = db
+      .prepare(`SELECT status, progress_pct, weight FROM strategy_nodes WHERE parent_id = ?`)
+      .all(current) as Array<{ status: string; progress_pct: number; weight: number }>;
+    if (children.length === 0) return;
+    const avg = weightedProgressPct(
+      children.map((c) => ({ pct: effectiveProgressPct(c.status, c.progress_pct), weight: c.weight })),
+    );
+    db.prepare(
+      `UPDATE strategy_nodes SET progress_pct = ?, status = ?, updated_at = datetime('now') WHERE id = ?`,
+    ).run(avg, rolledUpStatus(children, avg), current);
+    const parent = db.prepare(`SELECT parent_id FROM strategy_nodes WHERE id = ?`).get(current) as
+      | { parent_id: string | null }
+      | undefined;
+    current = parent?.parent_id ?? null;
+  }
+}
+
 // ── Session queries ──────────────────────────────────────
 
 /** Resolve the org_id for a session (now denormalized — single-table lookup). */
@@ -89,6 +115,36 @@ export function getSessionProject(db: Database.Database, sessionId: string): str
 export function sessionInOrg(db: Database.Database, sessionId: string, orgId: string): boolean {
   const row = db.prepare(`SELECT 1 as ok FROM sessions WHERE id = ? AND org_id = ?`).get(sessionId, orgId) as { ok: number } | undefined;
   return !!row;
+}
+
+// ── Project live status ──────────────────────────────────
+
+/** Session statuses that count as live/running everywhere (org badge, project status). */
+export const LIVE_SESSION_STATUSES_SQL = "('starting', 'running', 'idle', 'waiting_input')";
+
+/**
+ * Project status is DERIVED from its sessions, never trusted from the stored
+ * `projects.status` column: sessions arrive from many paths (orchestrator
+ * launches, hook/API `/api/sessions/register`, the scheduler) and only the
+ * orchestrator used to write the column, so hook-registered sessions left
+ * projects "idle" forever. One SQL expression, used by every reader (REST
+ * for web + mobile, mcp-control, mcp-gateway):
+ *
+ *   any LIVE session (starting/running/idle/waiting_input — the same set
+ *   the org "N running" badge counts) → 'running'
+ *   else any session paused      → 'paused'
+ *   else stored 'error'          → 'error'   (sticky operator-visible state)
+ *   else                         → 'idle'
+ *
+ * `alias` is the projects table alias in the caller's query (a constant,
+ * never caller input).
+ */
+export function projectLiveStatusSql(alias = "p"): string {
+  return `(CASE
+    WHEN EXISTS (SELECT 1 FROM sessions ls WHERE ls.project_id = ${alias}.id AND ls.status IN ${LIVE_SESSION_STATUSES_SQL}) THEN 'running'
+    WHEN EXISTS (SELECT 1 FROM sessions ls WHERE ls.project_id = ${alias}.id AND ls.status = 'paused') THEN 'paused'
+    WHEN ${alias}.status = 'error' THEN 'error'
+    ELSE 'idle' END)`;
 }
 
 // ── Alert queries ────────────────────────────────────────

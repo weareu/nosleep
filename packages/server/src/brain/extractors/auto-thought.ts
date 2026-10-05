@@ -23,7 +23,7 @@ import type Database from "better-sqlite3";
 import { activeDbFor } from "../storage/active-db.js";
 import { initialMetadata, type ThoughtTypeT } from "../thoughts/types.js";
 import { canSpawnHaiku, recordHaikuSpawn } from "../haiku-budget.js";
-import { headlessQuery } from "../../lib/headless-claude.js";
+import { headlessQuery, resolveLlmRoute } from "../../lib/headless-claude.js";
 
 const MODEL = "claude-haiku-4-5";
 const TIMEOUT_MS = 60_000; // 30s produced 1.7k timeouts under load — SDK boot + Haiku call needs headroom
@@ -43,6 +43,35 @@ If not:
   {"keep": false}
 
 Turn:
+"""
+{{CONTENT}}
+"""`;
+
+/**
+ * User-captured documents (uploads, URL captures) are distilled too. One
+ * thought per document: a PDF is distilled from its source artifact with the
+ * page texts concatenated, never page-by-page (budget).
+ */
+export const DISTILLABLE_DOCUMENT_KINDS: ReadonlySet<string> = new Set([
+  "document/markdown",
+  "document/text",
+  "document/web_fetch",
+  "document/pdf",
+]);
+
+const DOC_PROMPT = `You distil a document a user saved into their knowledge base.
+
+Decide whether it holds something a future reader would want to recall — a decision, insight, observation, reference, idea, task or question. Boilerplate, navigation chrome, empty templates and pure data dumps are NOT worth keeping.
+
+Return ONLY a single JSON object on one line, no commentary:
+
+If worth keeping:
+  {"keep": true, "type": "<observation|task|idea|reference|person_note|decision|insight|question>", "content": "<one or two sentence distillation of the document's key point, max 240 chars>"}
+
+If not:
+  {"keep": false}
+
+Document:
 """
 {{CONTENT}}
 """`;
@@ -83,6 +112,15 @@ interface AutoThoughtResult {
 
 /** Phase 12 — write a row to extractor_runs so the auto-thought
  *  extractor is visible on the admin health dashboard. Best-effort. */
+function modelLabel(): string {
+  try {
+    const r = resolveLlmRoute("brain");
+    return r.provider === "openai" ? `openai:${r.model}` : MODEL;
+  } catch {
+    return MODEL;
+  }
+}
+
 function recordRun(
   db: Database.Database,
   args: {
@@ -100,11 +138,11 @@ function recordRun(
        (run_id, ts, extractor, extractor_version, prompt_version, model,
         artifact_hash, duration_ms, result, error,
         project_id, org_id)
-       VALUES (?, ?, 'auto_thought', '0.1.0', 'phase11-v1', ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, 'auto_thought', '0.2.0', 'phase11-v1', ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       nanoid(),
       Math.floor(Date.now() / 1000),
-      MODEL,
+      modelLabel(),
       args.artifact_hash,
       args.duration_ms,
       args.result,
@@ -112,8 +150,11 @@ function recordRun(
       args.project_id,
       args.org_id,
     );
-  } catch {
-    /* audit is best-effort */
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[auto-thought] extractor_runs insert failed for ${args.artifact_hash}: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 
@@ -144,9 +185,29 @@ export async function runAutoThoughtExtraction(
   if (!artifact) {
     return { thought_id: null, skipped_reason: "artifact_not_found", duration_ms: 0 };
   }
-  if (!artifact.kind.startsWith("conversation/turn/")) {
+  const isDocument = DISTILLABLE_DOCUMENT_KINDS.has(artifact.kind);
+  if (!artifact.kind.startsWith("conversation/turn/") && !isDocument) {
     return { thought_id: null, skipped_reason: "wrong_kind", duration_ms: 0 };
   }
+  // Documents get an extractor_runs row for every outcome so a missing
+  // thought is diagnosable; conversation turns keep the success-only volume.
+  const finish = (
+    skipped_reason: string,
+    result: "skipped" | "failed" = "skipped",
+  ): AutoThoughtResult => {
+    const out = { thought_id: null, skipped_reason, duration_ms: performance.now() - started };
+    if (isDocument) {
+      recordRun(db, {
+        artifact_hash: artifact.hash,
+        org_id: artifact.org_id,
+        project_id: artifact.project_id,
+        duration_ms: out.duration_ms,
+        result,
+        skipped_reason,
+      });
+    }
+    return out;
+  };
 
   // Idempotency layer 1: skip if a thought already exists for this exact
   // artifact hash.
@@ -166,13 +227,12 @@ export async function runAutoThoughtExtraction(
     };
   }
 
-  const text = decodeContent(artifact.content);
+  const text =
+    artifact.kind === "document/pdf"
+      ? pdfPagesText(db, artifact.hash)
+      : decodeContent(artifact.content);
   if (!text || text.trim().length < MIN_CONTENT_LEN) {
-    return {
-      thought_id: null,
-      skipped_reason: "too_short",
-      duration_ms: performance.now() - started,
-    };
+    return finish("too_short");
   }
 
   // Idempotency layer 2: normalised-content fingerprint. Stops attackers
@@ -208,20 +268,12 @@ export async function runAutoThoughtExtraction(
     };
   }
 
-  const verdict = await callHaiku(text);
+  const verdict = await callHaiku(text, isDocument ? DOC_PROMPT : PROMPT);
   if (!verdict) {
-    return {
-      thought_id: null,
-      skipped_reason: "llm_failed",
-      duration_ms: performance.now() - started,
-    };
+    return finish("llm_failed", "failed");
   }
   if (verdict.keep === false) {
-    return {
-      thought_id: null,
-      skipped_reason: "not_thought_worthy",
-      duration_ms: performance.now() - started,
-    };
+    return finish("not_thought_worthy");
   }
 
   const thoughtId = insertThought(db, {
@@ -247,6 +299,25 @@ export async function runAutoThoughtExtraction(
     skipped_reason: null,
   });
   return finalResult;
+}
+
+/** Page texts of an ingested PDF (document/pdf_excerpt rows linked by
+ *  page_of_document), in page order, capped at MAX_CONTENT_LEN. */
+function pdfPagesText(db: Database.Database, sourceHash: string): string | null {
+  const rows = db
+    .prepare(
+      `SELECT a.content AS content
+         FROM artifact_edges e
+         JOIN artifacts a ON a.hash = e.from_hash
+        WHERE e.to_hash = ? AND e.relation = 'page_of_document'
+        ORDER BY CAST(json_extract(a.kind_specific_meta, '$.page_number') AS INTEGER)`,
+    )
+    .all(sourceHash) as Array<{ content: Buffer | null }>;
+  const text = rows
+    .map((r) => (r.content ? r.content.toString("utf8") : ""))
+    .filter(Boolean)
+    .join("\n\n");
+  return text ? text.slice(0, MAX_CONTENT_LEN) : null;
 }
 
 function decodeContent(content: Buffer | null): string | null {
@@ -286,6 +357,7 @@ function defangPromptDelimiters(s: string): string {
 
 async function callHaiku(
   content: string,
+  template: string,
 ): Promise<ExtractedThought | SkippedThought | null> {
   if (extractorOverride) return extractorOverride(content);
   if (!canSpawnHaiku()) {
@@ -294,7 +366,7 @@ async function callHaiku(
   }
   recordHaikuSpawn();
   const safeContent = defangPromptDelimiters(content);
-  const prompt = PROMPT.replace("{{CONTENT}}", safeContent);
+  const prompt = template.replace("{{CONTENT}}", safeContent);
   try {
     // brainInternal tags the run so nosleep hooks skip ingesting it —
     // otherwise the hooks ingest our triage prompt back as a "turn",

@@ -194,14 +194,68 @@ Mobile app's `fetchJson` unwraps `data` automatically.
 | `GET` | `/api/research/log` | Research query log |
 | `GET` | `/api/research/savings` | Token savings vs cold queries |
 
+## Uploading documents
+
+`POST /api/brain/ingest/file` — upload one file into the Brain. JSON body, file bytes base64-encoded (the same encoding the mobile photo/voice uploads use on `/api/brain/ingest`). Auth: `x-api-key`; a per-org key may only write to its own `org_id` (403 otherwise).
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `filename` | yes | Extension decides the type when recognised (browsers mislabel e.g. `.ts` as `video/mp2t`) |
+| `content_type` | no | Used when the extension is unknown |
+| `content_base64` | yes | Raw file bytes, base64 |
+| `org_id`, `project_id` | yes | Target scope |
+| `origin` | no | `{ tool, actor }`, default `{ tool: "brain-upload", actor: "user" }` |
+
+| Type | Stored as | What runs |
+|------|-----------|-----------|
+| `.pdf` | `document/pdf` (original bytes) + one `document/pdf_excerpt` per page with text, linked by `page_of_document` edges | pdf-parse text layer, per-page FTS + embeddings, one distilled thought per document. No OCR: scanned PDFs are stored with a warning and nothing searchable |
+| `.md .markdown` | `document/markdown` | FTS, embeddings, distilled thought |
+| `.txt .text .log` | `document/text` | FTS, embeddings, distilled thought |
+| `.json`, `.yaml .yml`, `.csv` | `data/json`, `data/yaml`, `data/csv` | FTS |
+| Source code (`.ts .tsx .js .jsx .py .go .rs .sql .sh` and `.java .kt .swift .rb .php .c .h .cpp .cs .css .html .xml .toml` …) | `code/blob/<ext>` or `code/blob` | FTS, embeddings, symbol extraction |
+| `.png .jpg .jpeg .gif .webp` | `media/image/photo` | Image extractors; caption/OCR via the `vision` LLM route when configured |
+
+Thought distillation and vision use the existing LLM routing (`NOSLEEP_LLM_*`, purposes `brain` and `vision`) and the brain spawn budget. Outcomes, including skips, are recorded in `extractor_runs`.
+
+Limits: 10 MB decoded per file (`BRAIN_INGEST_MAX_BYTES`); the request body limit is 16 MB. Uploads are refused while the disk is below the brain's free-space floor (`NOSLEEP_MIN_FREE_DISK_GB`).
+
+| Status | Meaning |
+|--------|---------|
+| `202` | Stored: `{ filename, kind, hash, duplicate, size, pages?, page_count?, warnings }` |
+| `400` | Missing/invalid fields |
+| `403` | Key bound to a different org |
+| `413` | Over the size cap, or low disk |
+| `415` | Unsupported type; `error.details.supported` lists the accepted types |
+| `422` | Bytes don't match the type (invalid base64, not UTF-8, corrupt PDF) |
+| `503` | `pdf-parse` not installed on the server |
+
+```bash
+curl -X POST http://localhost:3777/api/brain/ingest/file \
+  -H "x-api-key: YOUR_API_KEY" -H "content-type: application/json" \
+  -d "{\"filename\":\"report.pdf\",\"content_type\":\"application/pdf\",\"org_id\":\"org_personal\",\"project_id\":\"_org_level\",\"content_base64\":\"$(base64 < report.pdf | tr -d '\n')\"}"
+```
+
+`POST /api/brain/capture-url` with `mode: "full"` follows the same PDF path when the URL serves `application/pdf`. Capturing intranet or local hosts needs them listed in `NOSLEEP_URL_FETCH_ALLOW_HOSTS` (comma-separated exact hostnames/IPs); private addresses are blocked otherwise.
+
 ## CORS
 
 Origin allowlist is callback-based: any host on ports `5173`, `3777`, or `19006` is permitted (see [server.ts](../packages/server/src/server.ts) `ALLOWED_CORS_PORTS`). Wildcard origin is never used.
 
+## Brain Search
+
+`POST /api/brain/search` — one ranked list over **both** brain layers. Body is a QuerySpec (`org_id`, `project_id`, `scope?`, `text?`, `facets?`, `temporal?`, `layers?`, `include_archived?`, `limit?`).
+
+- `layers` defaults to `["archive", "thoughts"]`. Archive artifacts and distilled thoughts are fused into one ranking (reciprocal rank fusion of BM25, semantic and thought-FTS retrievers).
+- Each result carries `layer: "archive" | "thoughts"`. For thoughts, `hash` is the thought id and `thought: { id, thought_type, visibility, topics }` is set; `kind` is `thought/<type>`.
+- Thoughts honour visibility: only `active` unless `include_archived: true`; merged-away thoughts never appear. Org and project scope apply to both layers.
+- Archive-only facets (`kind_prefix`, `origin`, `session_id`, `actor`, `numeric`) turn the query into an archive query (no thoughts).
+- Content is stored once (content-addressed), and every project that ingested it can find it. A duplicate upload into a second project returns `duplicate: true` and is still found by that project's search.
+
 ## Body Limits
 
-- Global: 1 MB
-- Hook callbacks: subject to global limit (~256KB realistic)
+- Global request body: 16 MB (Fastify `bodyLimit`, `packages/server/src/server.ts`) — sized so hook callbacks carrying a large `Read` result or tool output don't 413. Larger bodies get `413`.
+- Brain file upload (`POST /api/brain/ingest/file`, MCP `ingest_file` / `brain_ingest_file`): 10 MB of **decoded** file bytes (`BRAIN_INGEST_MAX_BYTES`); base64 inflates that to ~13.4 MB on the wire, which fits under the 16 MB body limit.
+- Hook callbacks: subject to the global 16 MB limit.
 
 ## Errors
 

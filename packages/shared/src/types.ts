@@ -141,7 +141,7 @@ export interface StrategyNodeWithMetrics extends StrategyNode {
   readonly blockedLeaves: number;
   /** Deepest level in this subtree (0 = this is a leaf) */
   readonly maxDepthBelow: number;
-  /** Computed progress from children (completedLeaves / totalLeaves * 100) */
+  /** Weighted roll-up of children's progress (finished leaves = 100%). */
   readonly computedProgressPct: number;
 }
 
@@ -152,6 +152,8 @@ export interface StrategyTree {
   readonly totalNodes: number;
   readonly totalLeaves: number;
   readonly completedLeaves: number;
+  /** Same weighted roll-up as the root's computedProgressPct — the single
+   *  source of truth every view must display. */
   readonly overallProgressPct: number;
 }
 

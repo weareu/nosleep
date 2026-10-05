@@ -20,6 +20,8 @@ import {
   useState,
 } from "react";
 import { useOrgProject, ORG_LEVEL } from "../../components/OrgProjectPicker";
+import { DocumentDropZone } from "./DocumentDropZone";
+import { UrlCapturePanel } from "./UrlCapturePanel";
 import {
   captureThought,
   ingestAudio,
@@ -352,6 +354,7 @@ export function BrainCapture(): React.ReactElement {
         showToast(parentId ? "Sent to Strategy (child)" : "Sent to Strategy (root)");
       } else {
         const refs: Array<{ hash: string; relation: string }> = [];
+        let audioError: string | null = null;
         if (audioReady) {
           const b64 = await blobToBase64(audioReady.blob);
           try {
@@ -364,8 +367,9 @@ export function BrainCapture(): React.ReactElement {
               transcript: text,
             });
             refs.push({ hash: art.hash, relation: "recorded_as" });
-          } catch {
-            /* non-fatal */
+          } catch (e) {
+            // Non-fatal — the note still captures — but say so.
+            audioError = e instanceof Error ? e.message : String(e);
           }
         }
         await captureThought({
@@ -375,7 +379,11 @@ export function BrainCapture(): React.ReactElement {
           source_kind: "web_note",
           source_refs: refs.length > 0 ? refs : undefined,
         });
-        showToast("Captured to Brain");
+        if (audioError) {
+          showToast(`Captured to Brain, but the recording failed to upload: ${audioError}`, "err", 6_000);
+        } else {
+          showToast("Captured to Brain");
+        }
       }
       setContent("");
       setAudioReady(null);
@@ -396,7 +404,8 @@ export function BrainCapture(): React.ReactElement {
     <div className="mx-auto max-w-3xl px-4 py-6 text-slate-100">
       <h1 className="text-xl font-semibold mb-1">Capture a thought</h1>
       <p className="text-sm text-slate-400 mb-4">
-        Speak or type. Send to the Brain archive or attach as a strategy-tree note.
+        Speak or type, upload documents, or capture a URL. Send to the Brain
+        archive or attach as a strategy-tree note.
       </p>
 
       <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
@@ -537,6 +546,9 @@ export function BrainCapture(): React.ReactElement {
           </div>
         )}
       </div>
+
+      <DocumentDropZone orgId={orgId} projectId={projectId} />
+      <UrlCapturePanel orgId={orgId} projectId={projectId} />
     </div>
   );
 }

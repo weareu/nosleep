@@ -18,6 +18,7 @@ import { isVecLoaded } from "../../storage/vec-loader.js";
 import { getEmbedProvider } from "../../extractors/embed-provider.js";
 import type { SelectedFile } from "../../storage/file-selection.js";
 import { thoughtVisibilityPredicate } from "../../thoughts/visibility.js";
+import { artifactInProjectSql } from "../filters.js";
 
 export async function runSemanticText(
   db: Database.Database,
@@ -73,7 +74,7 @@ export async function runSemanticText(
             AND m.hash IN (
               SELECT a.hash FROM ${s}.artifacts a
                WHERE a.org_id = ?
-                 ${q.scope === "project" ? "AND a.project_id = ?" : ""}
+                 ${q.scope === "project" ? `AND ${artifactInProjectSql(s)}` : ""}
             ))
           OR
          (m.referrer_kind = 'thought'
@@ -86,7 +87,7 @@ export async function runSemanticText(
        )
     `);
     params.push(embBuf, overFetchPerFile, q.org_id);
-    if (q.scope === "project") params.push(q.project_id);
+    if (q.scope === "project") params.push(q.project_id, q.project_id);
     params.push(q.org_id);
     if (q.scope === "project") params.push(q.project_id);
   }

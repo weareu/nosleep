@@ -13,7 +13,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type {
   OcrProvider,
   CaptionProvider,
@@ -51,8 +51,11 @@ interface CachedResult {
 
 const cache = new Map<string, Promise<CachedResult | null>>();
 
+// Content hash: the previous length+first+last-byte key collided for
+// different images (same size, same JPEG SOI byte, same final byte) and
+// handed one image's caption/OCR to another.
 function cacheKey(buffer: Buffer): string {
-  return `${buffer.length}:${buffer[0] ?? 0}:${buffer[buffer.length - 1] ?? 0}`;
+  return createHash("sha256").update(buffer).digest("hex");
 }
 
 async function callClaudeVision(buffer: Buffer): Promise<CachedResult | null> {

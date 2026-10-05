@@ -10,6 +10,9 @@
 import { fetchRef, normaliseUrl } from "./url-fetcher-ref.js";
 import { ingest } from "../ingest/pipeline.js";
 import { safeFetch, SsrfBlockedError } from "./url-fetch-guard.js";
+import { ingestFile } from "../ingest/file-ingest.js";
+import { scheduleAutoThoughtExtraction } from "./worker.js";
+import { BRAIN_INGEST_MAX_BYTES } from "../config.js";
 
 const FETCH_TIMEOUT_MS = 30_000;
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
@@ -21,6 +24,11 @@ export interface FullCaptureRequest {
   project_id: string;
   link_hash: string;
   tags?: string[];
+  /** Distil the fetched document into a thought (user captures). Default false
+   *  so background re-fetch jobs don't re-spend the LLM budget. */
+  distill?: boolean;
+  /** Receives non-fatal failures (scheduling, audit). */
+  onWarn?: (msg: string, err: unknown) => void;
 }
 
 export interface FullCaptureResult {
@@ -29,6 +37,8 @@ export interface FullCaptureResult {
   title: string | null;
   excerpt: string | null;
   error: string | null;
+  /** Set when the URL was a PDF: per-page artifacts. */
+  pages?: Array<{ page: number; hash: string }>;
 }
 
 /**
@@ -55,7 +65,7 @@ export async function captureUrlFull(
   try {
     const res = await safeFetch(normalized, {
       method: "GET",
-      headers: { "User-Agent": USER_AGENT, Accept: "text/html" },
+      headers: { "User-Agent": USER_AGENT, Accept: "text/html,application/pdf;q=0.9" },
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) {
@@ -68,6 +78,9 @@ export async function captureUrlFull(
       };
     }
     const ct = (res.headers.get("content-type") ?? "").toLowerCase();
+    if (ct.startsWith("application/pdf")) {
+      return await capturePdf(req, normalized, meta.title, res);
+    }
     if (!ct.includes("html") && !ct.includes("xml")) {
       return {
         fetch_hash: null,
@@ -140,6 +153,12 @@ export async function captureUrlFull(
     schema_version: 1,
   });
 
+  if (req.distill && !result.duplicate) {
+    scheduleAutoThoughtExtraction({ org_id: req.org_id, artifact_hash: result.hash }).catch((err) =>
+      req.onWarn?.("auto-thought scheduling failed", err),
+    );
+  }
+
   return {
     fetch_hash: result.hash,
     article_length: markdown.length,
@@ -147,6 +166,58 @@ export async function captureUrlFull(
     excerpt: markdown.slice(0, 240),
     error: null,
   };
+}
+
+/** URL → PDF: same path as a PDF upload (source + searchable pages), with
+ *  the source artifact linked to the reference/link. */
+async function capturePdf(
+  req: FullCaptureRequest,
+  normalized: string,
+  title: string | null,
+  res: Response,
+): Promise<FullCaptureResult> {
+  const fail = (error: string): FullCaptureResult => ({
+    fetch_hash: null,
+    article_length: 0,
+    title,
+    excerpt: null,
+    error,
+  });
+  const declared = Number(res.headers.get("content-length") ?? "0");
+  if (declared > BRAIN_INGEST_MAX_BYTES) {
+    return fail(`PDF is ${declared} bytes; max ${BRAIN_INGEST_MAX_BYTES}`);
+  }
+  const bytes = Buffer.from(await res.arrayBuffer());
+  if (bytes.length > BRAIN_INGEST_MAX_BYTES) {
+    return fail(`PDF is ${bytes.length} bytes; max ${BRAIN_INGEST_MAX_BYTES}`);
+  }
+  const lastSegment = decodeURIComponent(new URL(normalized).pathname.split("/").pop() ?? "");
+  const filename = lastSegment.toLowerCase().endsWith(".pdf") ? lastSegment : "document.pdf";
+  try {
+    const r = await ingestFile({
+      filename,
+      content_type: "application/pdf",
+      bytes,
+      org_id: req.org_id,
+      project_id: req.project_id,
+      origin: { tool: "brain-api", version: "0.1", actor: "url_full" },
+      edges: [{ to_hash: req.link_hash, relation: "link_resolved_to_fetch" }],
+      extra_meta: { source: "url_capture", source_url: normalized, tags: req.tags ?? [] },
+      distill: req.distill ?? false,
+      onWarn: req.onWarn,
+    });
+    const pdfTitle = title ?? filename;
+    return {
+      fetch_hash: r.hash,
+      article_length: r.size,
+      title: pdfTitle,
+      excerpt: null,
+      error: r.warnings.length > 0 ? r.warnings.join("; ") : null,
+      pages: r.pages,
+    };
+  } catch (err) {
+    return fail(`PDF ingest failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 // ── Heuristic article extraction ─────────────────────────
