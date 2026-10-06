@@ -6,22 +6,22 @@ import { createTestDb, seedGatewayData } from "../helpers/db.js";
 /**
  * Regression: an explicit projectId must resolve the org FROM THE PROJECT, not
  * from the caller's session org. Before this, a session bound to org_personal
- * querying a Wyobi project's tree got filtered to zero rows and lied with
+ * querying a Work project's tree got filtered to zero rows and lied with
  * "No strategy tree" (a real incident: a large tree reported as empty).
  */
 describe("project-scoped strategy reads resolve org from the project", () => {
   let db: Database.Database;
   let actions: Action[];
-  let wyobiProject: string;
+  let workProject: string;
 
   beforeEach(() => {
     db = createTestDb();
     const seed = seedGatewayData(db);
-    wyobiProject = seed.projectWyobiId;
+    workProject = seed.projectWorkId;
     db.prepare(
       `INSERT INTO strategy_nodes (id, project_id, org_id, parent_id, type, title, status, depth, sort_order)
-       VALUES ('wn1', ?, 'org_wyobi', NULL, 'task', 'Wyobi-only task', 'pending', 0, 0)`,
-    ).run(wyobiProject);
+       VALUES ('wn1', ?, 'org_work', NULL, 'task', 'Work-only task', 'pending', 0, 0)`,
+    ).run(workProject);
 
     // Caller is bound to org_personal — a DIFFERENT org than the project's.
     actions = buildActions({ db, envOrgId: "org_personal", serverUrl: "http://localhost:3777", apiKey: "k" });
@@ -29,15 +29,15 @@ describe("project-scoped strategy reads resolve org from the project", () => {
 
   afterEach(() => db.close());
 
-  it("strategy_tree returns the Wyobi project's tree despite an org_personal binding", async () => {
-    const res = await dispatch(actions, "strategy_tree", undefined, { projectId: wyobiProject, full: true });
-    expect(res.text).toContain("Wyobi-only task");
+  it("strategy_tree returns the Work project's tree despite an org_personal binding", async () => {
+    const res = await dispatch(actions, "strategy_tree", undefined, { projectId: workProject, full: true });
+    expect(res.text).toContain("Work-only task");
     expect(res.text).not.toMatch(/No strategy tree/i);
   });
 
-  it("strategy_next finds the Wyobi project's actionable task despite an org_personal binding", async () => {
-    const res = await dispatch(actions, "strategy_next", undefined, { projectId: wyobiProject });
-    expect(res.text).toContain("Wyobi-only task");
+  it("strategy_next finds the Work project's actionable task despite an org_personal binding", async () => {
+    const res = await dispatch(actions, "strategy_next", undefined, { projectId: workProject });
+    expect(res.text).toContain("Work-only task");
   });
 
   it("gives an honest message for a genuinely empty project (not a misleading 'no actionable')", async () => {

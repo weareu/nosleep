@@ -2,12 +2,6 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-@theme {
-  --color-org-personal: #6366f1;
-  --color-org-wyobi: #f59e0b;
-  --color-org-apply: #10b981;
-}
-
 /* Custom scrollbar for dark theme */
 ::-webkit-scrollbar {
   width: 6px;

@@ -4,6 +4,7 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "vitest";
+import Fastify from "fastify";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -14,6 +15,7 @@ process.env.NOSLEEP_DATA_DIR = tmpDataDir;
 import { ingest } from "../ingest/pipeline.js";
 import { runCodeSymbolExtraction } from "../extractors/code-symbols.js";
 import { activeDbFor, closeAllBrainDbs } from "../storage/active-db.js";
+import { registerBrainImageListRoutes } from "../routes/images.js";
 
 const ORG = "org_listep_test";
 const PROJ = "proj_listep";
@@ -176,5 +178,52 @@ describe("phase 5-finish — code list", () => {
     expect(listep).toBeDefined();
     expect(listep!.snapshots).toBeGreaterThan(0);
     expect(listep!.symbol_count).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("GET /api/brain/images (route)", () => {
+  // Regression: the query runs with safeIntegers(true), so width/height came
+  // back as BigInt and JSON serialisation threw ("Do not know how to
+  // serialize a BigInt") — every phone photo (which carries dimensions)
+  // made the images list 500, so uploaded photos never showed up.
+  test("serialises a photo that has width/height + phash", async () => {
+    const proj = "proj_listep_route";
+    const img = ingest({
+      kind: "media/image/photo",
+      content: Buffer.from([9, 8, 7, 6, 5]).toString("base64"),
+      content_type: "image/jpeg",
+      org_id: ORG,
+      project_id: proj,
+      origin: { tool: "nosleep-mobile", actor: "user" },
+      kind_specific_meta: { width: 1600, height: 1200 },
+      schema_version: 1,
+    });
+    activeDbFor(ORG)
+      .prepare(
+        `INSERT OR REPLACE INTO image_features (hash, phash, width, height, mime, extracted_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(img.hash, -0x0f0f0f0f0f0f0f0fn, 1600, 1200, "image/jpeg", 1);
+
+    const app = Fastify({ logger: false });
+    registerBrainImageListRoutes(app);
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/brain/images?org_id=${ORG}&project_id=${proj}&cluster=phash`,
+    });
+    await app.close();
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.total).toBe(1);
+    expect(body.items[0]).toMatchObject({
+      hash: img.hash,
+      kind: "media/image/photo",
+      width: 1600,
+      height: 1200,
+      phash: (-0x0f0f0f0f0f0f0f0fn).toString(),
+    });
+    expect(typeof body.items[0].ts).toBe("number");
+    expect(body.clusters).toEqual([{ representative: img.hash, size: 1, hashes: [img.hash] }]);
   });
 });

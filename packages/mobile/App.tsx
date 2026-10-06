@@ -11,13 +11,13 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { RootNavigator } from "./src/navigation/RootNavigator";
-import { GlobalMicFab } from "./src/components/GlobalMicFab";
 import { wsManager } from "./src/services/ws";
 import {
   requestPermissionsAndRegister,
   addNotificationResponseListener,
 } from "./src/services/push";
 import { getServerConfig, resetServerConfig, setServerConfigFromManualUrl } from "./src/config";
+import { listOrgs } from "./src/services/api";
 import { installGlobalErrorReporter, report as clientLog } from "./src/services/clientLog";
 
 // Install the global error reporter as the very first thing the app does
@@ -97,6 +97,11 @@ export default function App(): React.JSX.Element {
           keyPrefix: (config.apiKey ?? "").slice(0, 8),
         });
         setConnectionState("connected");
+        // Prime the org registry (user-defined names + colours) so badges
+        // render correctly on every screen, not just after Dashboard loads.
+        listOrgs().catch(() => {
+          /* fetchJson already reports; screens retry on refresh */
+        });
       } else {
         clientLog("warn", "boot", "discovery returned empty apiUrl");
         setConnectionState("failed");
@@ -170,10 +175,7 @@ export default function App(): React.JSX.Element {
           <FailedScreen onRetry={handleRetry} onManualConnect={handleManualConnect} />
         )}
         {connectionState === "connected" && (
-          <>
-            <RootNavigator />
-            <GlobalMicFab />
-          </>
+          <RootNavigator />
         )}
       </SafeAreaProvider>
     </GestureHandlerRootView>

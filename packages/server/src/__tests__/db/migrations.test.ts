@@ -209,10 +209,12 @@ describe("Production migration list", () => {
     db.close();
   });
 
-  it("seeds the three orgs", () => {
+  it("seeds only the default Personal org on a fresh install", () => {
     const db = initializeDatabase(":memory:");
-    const orgs = db.prepare(`SELECT slug FROM organizations ORDER BY slug`).all() as Array<{ slug: string }>;
-    expect(orgs.map((o) => o.slug)).toEqual(["apply", "personal", "wyobi"]);
+    const orgs = db.prepare(`SELECT id, name, slug, color FROM organizations`).all();
+    expect(orgs).toEqual([{ id: "org_personal", name: "Personal", slug: "personal", color: "#6366f1" }]);
+    const sql = (db.prepare(`SELECT sql FROM sqlite_master WHERE name = 'organizations'`).get() as { sql: string }).sql;
+    expect(sql).not.toMatch(/CHECK/i);
     db.close();
   });
 
@@ -222,6 +224,132 @@ describe("Production migration list", () => {
     expect(cols.find((c) => c.name === "org_id")).toBeDefined();
     expect(cols.find((c) => c.name === "parent_session_id")).toBeDefined();
     expect(cols.find((c) => c.name === "failure_mode")).toBeDefined();
+    db.close();
+  });
+});
+
+// ── v25: organizations rebuilt without the fixed-slug CHECK ───────────
+
+/**
+ * Build a DB the way an older install has it: `organizations` created with a
+ * CHECK pinning slug to a fixed list, three orgs, migrations 1-24 applied, and
+ * child rows in every org-referencing table.
+ */
+function buildLegacyDb(): Database.Database {
+  const db = new Database(":memory:");
+  db.pragma("foreign_keys = ON");
+  db.prepare(`
+    CREATE TABLE organizations (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      slug TEXT NOT NULL UNIQUE CHECK(slug IN ('personal', 'work', 'side')),
+      color TEXT NOT NULL DEFAULT '#6366f1',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `).run();
+  const ins = db.prepare(`INSERT INTO organizations (id, name, slug, color, created_at) VALUES (?, ?, ?, ?, ?)`);
+  ins.run("org_personal", "Personal", "personal", "#6366f1", "2025-01-01 00:00:00");
+  ins.run("org_work", "Work", "work", "#f59e0b", "2025-01-02 00:00:00");
+  ins.run("org_side", "Side", "side", "#10b981", "2025-01-03 00:00:00");
+  runMigrations(db, MIGRATIONS.filter((m) => m.version < 25));
+
+  for (const org of ["personal", "work", "side"]) {
+    const orgId = `org_${org}`;
+    db.prepare(`INSERT INTO accounts (id, org_id, name, type) VALUES (?, ?, ?, 'max')`).run(`acc_${org}`, orgId, `${org} acc`);
+    db.prepare(`INSERT INTO projects (id, org_id, name, path, account_id) VALUES (?, ?, ?, ?, ?)`)
+      .run(`proj_${org}`, orgId, `${org} proj`, `/tmp/${org}`, `acc_${org}`);
+    db.prepare(`INSERT INTO sessions (id, project_id, account_id, goal_text, goal_hash, org_id) VALUES (?, ?, ?, 'g', 'h', ?)`)
+      .run(`sess_${org}`, `proj_${org}`, `acc_${org}`, orgId);
+    db.prepare(`INSERT INTO strategy_nodes (id, project_id, org_id, type, title) VALUES (?, ?, ?, 'goal', 't')`)
+      .run(`node_${org}`, `proj_${org}`, orgId);
+    db.prepare(`INSERT INTO alerts (org_id, type, message) VALUES (?, 'info', 'm')`).run(orgId);
+    db.prepare(`INSERT INTO memory (id, org_id, category, key, value) VALUES (?, ?, 'fact', 'k', 'v')`).run(`mem_${org}`, orgId);
+    db.prepare(`INSERT INTO session_messages (id, from_session_id, org_id, type, payload) VALUES (?, ?, ?, 'info', 'p')`).run(`msg_${org}`, `sess_${org}`, orgId);
+  }
+  return db;
+}
+
+/** Every row of every user table, keyed by table — for before/after equality. */
+function snapshot(db: Database.Database): Record<string, unknown[]> {
+  const tables = db
+    .prepare(
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+         AND name != 'schema_migrations' AND sql NOT LIKE 'CREATE VIRTUAL%' ORDER BY name`,
+    )
+    .all() as Array<{ name: string }>;
+  const out: Record<string, unknown[]> = {};
+  for (const { name } of tables) {
+    out[name] = db.prepare(`SELECT * FROM "${name}"`).all().map((r) => JSON.stringify(r)).sort();
+  }
+  return out;
+}
+
+describe("migration 25 organizations_user_defined", () => {
+  it("removes the slug CHECK while preserving every row, id and FK", () => {
+    const db = buildLegacyDb();
+    expect(() => db.prepare(`INSERT INTO organizations (id, name, slug) VALUES ('org_x', 'X', 'x')`).run()).toThrow(/CHECK/);
+    const before = snapshot(db);
+
+    runMigrations(db, MIGRATIONS);
+
+    expect(snapshot(db)).toEqual(before);
+    const orgSql = (db.prepare(`SELECT sql FROM sqlite_master WHERE name = 'organizations'`).get() as { sql: string }).sql;
+    expect(orgSql).not.toMatch(/CHECK/i);
+    expect(db.pragma("foreign_key_check")).toEqual([]);
+    expect(db.pragma("integrity_check", { simple: true })).toBe("ok");
+    expect(db.pragma("foreign_keys", { simple: true })).toBe(1);
+    expect(getCurrentSchemaVersion(db)).toBe(MIGRATIONS[MIGRATIONS.length - 1].version);
+    expect(db.prepare(`SELECT name FROM sqlite_master WHERE name = 'organizations_rebuild'`).get()).toBeUndefined();
+
+    // Child tables still reference organizations(id) and FKs are enforced.
+    const accFks = db.pragma("foreign_key_list(accounts)") as Array<{ table: string; from: string }>;
+    expect(accFks.find((f) => f.from === "org_id")?.table).toBe("organizations");
+    expect(() =>
+      db.prepare(`INSERT INTO accounts (id, org_id, name, type) VALUES ('acc_bad', 'org_missing', 'b', 'max')`).run(),
+    ).toThrow(/FOREIGN KEY/);
+    // Arbitrary slugs are now accepted.
+    db.prepare(`INSERT INTO organizations (id, name, slug) VALUES ('org_client-x', 'Client X', 'client-x')`).run();
+    db.close();
+  });
+
+  it("is idempotent — re-running on a rebuilt table changes nothing", () => {
+    const db = buildLegacyDb();
+    runMigrations(db, MIGRATIONS);
+    const after = snapshot(db);
+    const v25 = MIGRATIONS.find((m) => m.version === 25)!;
+    db.transaction(() => v25.up(db))();
+    runMigrations(db, MIGRATIONS);
+    expect(snapshot(db)).toEqual(after);
+    db.close();
+  });
+
+  it("does not brick boot on orphan rows that predate the migration", () => {
+    const db = buildLegacyDb();
+    db.pragma("foreign_keys = OFF");
+    db.prepare(`INSERT INTO alerts (org_id, type, message) VALUES ('org_gone', 'info', 'orphan')`).run();
+    db.pragma("foreign_keys = ON");
+    expect(() => runMigrations(db, MIGRATIONS)).not.toThrow();
+    expect((db.prepare(`SELECT COUNT(*) AS n FROM alerts WHERE org_id = 'org_gone'`).get() as { n: number }).n).toBe(1);
+    db.close();
+  });
+});
+
+describe("runMigrations foreignKeysOff", () => {
+  it("rolls back a migration that introduces FK violations and restores foreign_keys", () => {
+    const db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    db.prepare(`CREATE TABLE p (id TEXT PRIMARY KEY)`).run();
+    db.prepare(`CREATE TABLE c (id TEXT PRIMARY KEY, p_id TEXT REFERENCES p(id))`).run();
+    const bad: Migration = {
+      version: 1,
+      name: "orphaning",
+      foreignKeysOff: true,
+      up: (d) => d.prepare(`INSERT INTO c (id, p_id) VALUES ('c1', 'nope')`).run(),
+    };
+    expect(() => runMigrations(db, [bad])).toThrow(/foreign key violations/);
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM c`).get()).toEqual({ n: 0 });
+    expect(getCurrentSchemaVersion(db)).toBe(0);
+    expect(db.pragma("foreign_keys", { simple: true })).toBe(1);
     db.close();
   });
 });

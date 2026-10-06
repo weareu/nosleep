@@ -1,8 +1,9 @@
 /**
- * Global floating mic button — visible on every screen via absolute
- * positioning above the navigator. Tap to open a compact sheet that
- * lets you dictate a quick voice note and fire it at either the brain
- * archive or the strategy tree without leaving the current screen.
+ * Docked mic button — the centre action of the bottom tab bar (rendered via
+ * the "Capture" tab's `tabBarButton`). It lives INSIDE the tab bar, so it
+ * never floats over screen content. Tap (or long-press) opens a compact
+ * sheet that lets you dictate a quick voice note and fire it at either the
+ * brain archive or the strategy tree without leaving the current screen.
  *
  * Project / org context: persists the last-used org and project so a
  * second tap goes to the same place. First-ever use defaults to
@@ -20,8 +21,9 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Ionicons } from "@expo/vector-icons";
 import {
   captureThought,
   ingestAudio,
@@ -37,45 +39,35 @@ import {
   type VoiceSession,
   type VoiceRecordingResult,
 } from "../services/voice";
-import { colors, TAB_BAR_HEIGHT } from "../theme";
+import { colors } from "../theme";
 import { OrgProjectPicker } from "./OrgProjectPicker";
 
 const LAST_SCOPE_KEY = "@nosleep/mic-fab/last-scope/v1";
 
-const FAB_SIZE = 56;
-/** Gap between the tab bar and the FAB. */
-const FAB_GAP = 14;
-
-/**
- * Bottom padding a tab screen's scroll content needs so its last rows can
- * scroll clear of the floating mic button (FAB height + gaps above the tab
- * bar). Apply to `contentContainerStyle.paddingBottom` of tab-screen lists.
- */
-export const FAB_CONTENT_INSET = FAB_GAP + FAB_SIZE + 12;
+/** Diameter of the docked mic button; fits inside TAB_BAR_HEIGHT. */
+const MIC_BUTTON_SIZE = 44;
 
 interface PersistedScope {
   orgId: string;
   projectId: string;
 }
 
-export function GlobalMicFab(): React.JSX.Element {
+export function MicTabButton(): React.JSX.Element {
   const [open, setOpen] = useState(false);
-  // Sit just above the tab bar on every device (home-indicator iPhones,
-  // web, Android) instead of a hard-coded offset.
-  const insets = useSafeAreaInsets();
-  const bottom = insets.bottom + TAB_BAR_HEIGHT + FAB_GAP;
 
   return (
-    <>
+    <View style={styles.slot}>
       <Pressable
         // Long-press opens straight to recording for hands-free use.
         onPress={() => setOpen(true)}
         onLongPress={() => setOpen(true)}
-        style={({ pressed }) => [styles.fab, { bottom }, pressed && styles.fabPressed]}
+        style={({ pressed }) => [styles.micTab, pressed && styles.micTabPressed]}
         accessibilityLabel="Quick voice note"
         accessibilityRole="button"
+        testID="mic-tab-button"
+        hitSlop={8}
       >
-        <Text style={styles.fabIcon}>🎤</Text>
+        <Ionicons name="mic" size={22} color="#fff" />
       </Pressable>
       <Modal
         visible={open}
@@ -85,7 +77,7 @@ export function GlobalMicFab(): React.JSX.Element {
       >
         <MicSheet onClose={() => setOpen(false)} />
       </Modal>
-    </>
+    </View>
   );
 }
 
@@ -248,8 +240,12 @@ function MicSheet({ onClose }: MicSheetProps): React.JSX.Element {
   }
 
   return (
-    <Pressable style={styles.backdrop} onPress={onClose}>
-      <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+    <Pressable style={styles.backdrop} onPress={onClose} accessible={false}>
+      <Pressable
+        style={styles.sheet}
+        onPress={(e) => e.stopPropagation()}
+        accessible={false}
+      >
         <SafeAreaView edges={["bottom"]}>
           <View style={styles.handle} />
           <View style={styles.scopeRow}>
@@ -357,23 +353,16 @@ function MicSheet({ onClose }: MicSheetProps): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  fab: {
-    position: "absolute",
-    right: 18,
-    width: FAB_SIZE,
-    height: FAB_SIZE,
-    borderRadius: FAB_SIZE / 2,
+  slot: { flex: 1, alignItems: "center", justifyContent: "center" },
+  micTab: {
+    width: MIC_BUTTON_SIZE,
+    height: MIC_BUTTON_SIZE,
+    borderRadius: MIC_BUTTON_SIZE / 2,
     backgroundColor: "#3b82f6",
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
   },
-  fabPressed: { opacity: 0.85 },
-  fabIcon: { fontSize: 24 },
+  micTabPressed: { opacity: 0.85 },
   backdrop: {
     flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.55)",

@@ -1,6 +1,7 @@
 // ── Organization ─────────────────────────────────────────
 
-export type OrgSlug = "personal" | "wyobi" | "apply";
+/** Org slug — user-defined, lower-case [a-z0-9-] (see ORG_SLUG_RE). */
+export type OrgSlug = string;
 
 export interface Organization {
   readonly id: string;

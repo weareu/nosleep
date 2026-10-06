@@ -140,9 +140,12 @@ existing projects (dashboard → Projects → Install hooks) to pick it up.
 
 ## 7. Platform and scope limits
 
-- **Orgs are fixed** to three slots (`personal`, `wyobi`, `apply`). They're
-  baked into the DB schema; renaming or adding orgs needs a migration that
-  doesn't exist yet.
+- **Orgs are user-defined.** A fresh install has only **Personal**. Add more
+  from the dashboard (Settings → Organizations), the setup wizard
+  (`node scripts/setup.mjs`), `POST /api/orgs {"name":"Client X"}`, or the MCP
+  action `org_create`. Rename/recolour with `PATCH /api/orgs/:id`; the id and
+  slug are permanent. Delete only works on an empty org (409 while it owns any
+  projects, sessions, memory, alerts or Brain data); Personal can't be deleted.
 - **Single machine.** One server, one SQLite DB, no multi-user auth model.
   The server listens on `0.0.0.0` for the phone, so keep it on a trusted LAN or
   Tailscale.

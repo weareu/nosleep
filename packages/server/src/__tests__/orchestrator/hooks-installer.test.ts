@@ -71,14 +71,14 @@ describe("installHooks", () => {
   it("hook scripts contain correct server URL and org ID", () => {
     const projectPath = getTempDir();
 
-    installHooks(projectPath, { serverPort: 4000, orgId: "org_wyobi" });
+    installHooks(projectPath, { serverPort: 4000, orgId: "org_work" });
 
     const preTool = readFileSync(
       join(projectPath, ".claude", "nosleep-hooks", "pre-tool.mjs"),
       "utf-8",
     );
     expect(preTool).toContain("http://localhost:4000");
-    expect(preTool).toContain("org_wyobi");
+    expect(preTool).toContain("org_work");
   });
 
   it("preserves existing settings (other keys)", () => {

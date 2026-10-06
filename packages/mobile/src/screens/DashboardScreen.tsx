@@ -16,8 +16,7 @@ import { listOrgs, listSessions, listProjects, updateProject, interveneSession }
 import { wsManager } from "../services/ws";
 import { useRefresh } from "../hooks/useRefresh";
 import { useWsEvent } from "../hooks/useWsEvent";
-import { colors, getOrgColor, ORG_NAMES } from "../theme";
-import { FAB_CONTENT_INSET } from "../components/GlobalMicFab";
+import { colors } from "../theme";
 import type { OrgWithStats, SessionWithProject, Project } from "../types";
 
 interface OrgSection {
@@ -71,7 +70,7 @@ export function DashboardScreen(): React.JSX.Element {
         return {
           orgId: org.id,
           orgName: org.name,
-          orgColor: getOrgColor(org.id),
+          orgColor: org.color,
           activeSessions: org.activeSessions ?? 0,
           unackedAlerts: org.unackedAlerts ?? 0,
           data: orgProjects,
@@ -458,7 +457,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   listContent: {
-    // Clear the floating mic button so the last rows/badges aren't covered.
-    paddingBottom: FAB_CONTENT_INSET,
+    paddingBottom: 20,
   },
 });

@@ -1,9 +1,11 @@
 import { initializeDatabase } from "../../../../server/src/db/schema.js";
+import { seedTestOrgs } from "../../../../server/src/__tests__/helpers/db.js";
 import type Database from "better-sqlite3";
 import { nanoid } from "nanoid";
 
 export function createTestDb(): Database.Database {
   const db = initializeDatabase(":memory:");
+  seedTestOrgs(db);
   return db;
 }
 

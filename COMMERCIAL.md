@@ -28,8 +28,8 @@ changes, a **commercial license** is available. It also covers:
 - **NoSleep Relay:** a hosted relay so the official mobile app can reach your
   machine and get push notifications without Tailscale or your own Expo/EAS
   project.
-- **Team edition:** user-defined orgs, multi-user auth, and shared strategy
-  trees and Brain across a team.
+- **Team edition:** multi-user auth, and shared strategy trees and Brain
+  across a team.
 
 If one of these would be useful to you, say so. Demand decides what gets
 built first.

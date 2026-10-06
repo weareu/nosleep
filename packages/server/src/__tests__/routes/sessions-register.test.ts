@@ -51,12 +51,12 @@ describe("POST /api/sessions/register — global-hook session visibility", () =>
   });
 
   it("attributes by PATH to the project's true org even if the payload org is wrong (global-hook default)", async () => {
-    // A global hook bakes org_personal, but the folder is a Wyobi project.
-    const res = await register(app, { orgId: "org_personal", projectPath: "/tmp/wyobi", claudeSessionId: "cc2" });
+    // A global hook bakes org_personal, but the folder is a Work project.
+    const res = await register(app, { orgId: "org_personal", projectPath: "/tmp/work", claudeSessionId: "cc2" });
     expect([200, 201]).toContain(res.statusCode);
     const row = db.prepare(`SELECT project_id, org_id FROM sessions WHERE claude_session_id='cc2'`).get() as { project_id: string; org_id: string };
-    expect(row.project_id).toBe("proj_wyobi_001");
-    expect(row.org_id).toBe("org_wyobi"); // NOT org_personal — resolved by path
+    expect(row.project_id).toBe("proj_work_001");
+    expect(row.org_id).toBe("org_work"); // NOT org_personal — resolved by path
   });
 
   it("auto-provisions an Ad-hoc project for an unknown folder (no more silent 404)", async () => {
@@ -75,7 +75,7 @@ describe("POST /api/sessions/register — global-hook session visibility", () =>
 
   it("labels OpenCode sessions (agent: opencode) and keeps Claude Code as the default", async () => {
     await register(app, { orgId: "org_personal", projectPath: "/tmp/personal", claudeSessionId: "ses_oc1", agent: "opencode" });
-    await register(app, { orgId: "org_wyobi", projectPath: "/tmp/wyobi", claudeSessionId: "cc-default" });
+    await register(app, { orgId: "org_work", projectPath: "/tmp/work", claudeSessionId: "cc-default" });
     const oc = db.prepare(`SELECT goal_text FROM sessions WHERE claude_session_id='ses_oc1'`).get() as { goal_text: string };
     const cc = db.prepare(`SELECT goal_text FROM sessions WHERE claude_session_id='cc-default'`).get() as { goal_text: string };
     expect(oc.goal_text).toBe("Manual OpenCode session");
@@ -207,7 +207,7 @@ describe("project status is derived from live sessions (web + mobile read /api/p
   });
 
   it("a stale stored 'running' with no live session reads as idle", async () => {
-    db.prepare(`UPDATE projects SET status='running' WHERE id='proj_wyobi_001'`).run();
-    expect((await statusOf("proj_wyobi_001")).list).toBe("idle");
+    db.prepare(`UPDATE projects SET status='running' WHERE id='proj_work_001'`).run();
+    expect((await statusOf("proj_work_001")).list).toBe("idle");
   });
 });

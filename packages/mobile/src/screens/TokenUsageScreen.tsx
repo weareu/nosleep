@@ -10,7 +10,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { listOrgs, listSessions } from "../services/api";
 import { useRefresh } from "../hooks/useRefresh";
 import { useWsEvent } from "../hooks/useWsEvent";
-import { colors, getOrgColor, ORG_NAMES } from "../theme";
+import { colors, getOrgColor, getOrgName } from "../theme";
 import { parseDateString } from "../utils";
 import type { OrgWithStats, SessionWithProject } from "../types";
 
@@ -77,7 +77,7 @@ function TopSessionRow({
 }): React.JSX.Element {
   const orgColor = session.orgId ? getOrgColor(session.orgId) : colors.textMuted;
   const orgName = session.orgId
-    ? ORG_NAMES[session.orgId] ?? session.orgId
+    ? getOrgName(session.orgId)
     : "Unknown";
 
   return (

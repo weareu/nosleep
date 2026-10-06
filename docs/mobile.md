@@ -12,8 +12,9 @@ own.
 
 ## Screens
 
-Five bottom tabs: **Dashboard · Projects · Brain · Alerts · More**. A floating
-mic button sits above every screen.
+Five bottom tabs: **Dashboard · Projects · Brain · Alerts · More**, with a mic
+button docked in the centre of the tab bar for quick voice notes (it opens a
+capture sheet without leaving the current screen).
 
 | Screen | Where | What you can do |
 |---|---|---|

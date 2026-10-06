@@ -330,7 +330,7 @@ export class TaskScheduler {
         if (!existing) {
           this.db.prepare(
             `INSERT INTO alerts (org_id, project_id, type, severity, message) VALUES ('org_personal', NULL, 'disk_low', 'critical', ?)`,
-          ).run(`Disk critically low: ${headroom.freeGB.toFixed(1)}GB free (< ${MIN_FREE_GB}GB floor). Brain ingest is PAUSED until space is freed — biggest consumer is data/brain (org_apply active.db).`);
+          ).run(`Disk critically low: ${headroom.freeGB.toFixed(1)}GB free (< ${MIN_FREE_GB}GB floor). Brain ingest is PAUSED until space is freed — biggest consumer is usually data/brain/<org>/active.db.`);
         }
       }
     } catch { /* guard is best-effort */ }

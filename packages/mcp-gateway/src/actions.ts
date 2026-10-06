@@ -9,6 +9,7 @@ import {
   listOrgAlerts, acknowledgeAlert, acknowledgeAllOrgAlerts,
   getLoopConfig, upsertLoopConfig, type LoopMode,
   projectLiveStatusSql, propagateStrategyProgress,
+  listOrgs, createOrg, OrgError, orgApiKeyEnvName,
 } from "@nosleep/shared";
 import { readBrainFilePayload } from "@nosleep/shared/dist/brain-file.js";
 
@@ -36,11 +37,14 @@ export interface GatewayDeps {
 function buildHelpers(deps: GatewayDeps) {
   const { db, envOrgId, envSessionId, serverUrl, apiKey } = deps;
 
-  const allOrgs = db.prepare(`SELECT id, name, slug FROM organizations`).all() as Array<{ id: string; name: string; slug: string }>;
-  const orgMap = new Map(allOrgs.map(o => [o.id, o]));
-  const orgSlugs = new Map(allOrgs.map(o => [o.slug, o]));
+  // Orgs are user-defined and can be created at runtime — always read live.
+  const orgByIdOrSlug = db.prepare(`SELECT id, name, slug FROM organizations WHERE id = ? OR slug = ?`);
+  type OrgRef = { id: string; name: string; slug: string };
+  function getOrgRef(idOrSlug: string): OrgRef | undefined {
+    return orgByIdOrSlug.get(idOrSlug, idOrSlug) as OrgRef | undefined;
+  }
 
-  function resolveOrg(orgId?: string): { id: string; name: string; slug: string } | undefined {
+  function resolveOrg(orgId?: string): OrgRef | undefined {
     // SECURITY: when the request is bound to a trusted org (envOrgId, derived
     // by the HTTP MCP endpoint from the authenticated session/project header),
     // that org is AUTHORITATIVE — a caller-supplied orgId cannot override it.
@@ -48,8 +52,8 @@ function buildHelpers(deps: GatewayDeps) {
     // another org's memory or brain artifacts (which are stored in a per-org
     // DB selected by this org). Only when there is NO trusted binding do we
     // fall back to the caller-supplied orgId (e.g. dashboard/admin contexts).
-    if (envOrgId) return orgMap.get(envOrgId);
-    if (orgId) return orgMap.get(orgId) ?? orgSlugs.get(orgId);
+    if (envOrgId) return getOrgRef(envOrgId);
+    if (orgId) return getOrgRef(orgId);
     return undefined;
   }
 
@@ -105,7 +109,7 @@ function buildHelpers(deps: GatewayDeps) {
   }
 
 
-  return { orgMap, orgSlugs, resolveOrg, resolveSessionOrg, resolveProjectId, resolveProjectOrg, apiCall, propagateUp };
+  return { getOrgRef, resolveOrg, resolveSessionOrg, resolveProjectId, resolveProjectOrg, apiCall, propagateUp };
 }
 
 // ── Action Builder ─────────────────────────────────────
@@ -126,7 +130,7 @@ export function buildActions(deps: GatewayDeps): Action[] {
     if (!sid) return "No session ID. Pass sessionId or set NOSLEEP_SESSION_ID.";
     const orgId = h.resolveSessionOrg(sid);
     if (!orgId) return "Session not found.";
-    const org = h.orgMap.get(orgId)!;
+    const org = h.getOrgRef(orgId)!;
     const goal = db.prepare(`SELECT objective, acceptance_criteria, current_phase, progress_pct FROM goals WHERE session_id = ? ORDER BY created_at DESC LIMIT 1`).get(sid) as { objective: string; acceptance_criteria: string; current_phase: string; progress_pct: number } | undefined;
     if (!goal) return "No goal found for this session.";
     let criteria: Array<{ description: string; met: boolean }>;
@@ -155,7 +159,7 @@ export function buildActions(deps: GatewayDeps): Action[] {
     if (!sid) return "No session context.";
     const orgId = h.resolveSessionOrg(sid);
     if (!orgId) return "Session not found.";
-    const org = h.orgMap.get(orgId)!;
+    const org = h.getOrgRef(orgId)!;
     // Org check uses sessions.org_id directly — no JOIN through projects
     const goal = db.prepare(`SELECT g.objective, g.current_phase, g.progress_pct FROM goals g JOIN sessions s ON g.session_id = s.id WHERE g.session_id = ? AND s.org_id = ? ORDER BY g.created_at DESC LIMIT 1`).get(sid, orgId) as { objective: string; current_phase: string; progress_pct: number } | undefined;
     const alerts = listSessionDriftAlerts(db, sid, orgId, 3);
@@ -170,7 +174,7 @@ export function buildActions(deps: GatewayDeps): Action[] {
     if (!sid) return "No session context.";
     const orgId = h.resolveSessionOrg(sid);
     if (!orgId) return "Session not found.";
-    const org = h.orgMap.get(orgId)!;
+    const org = h.getOrgRef(orgId)!;
     // We still need projects join to read token_budget, but we filter by sessions.org_id
     const session = getSessionBudget(db, sid, orgId);
     if (!session) return "Session not found.";
@@ -180,7 +184,7 @@ export function buildActions(deps: GatewayDeps): Action[] {
 
   register("request_help", "Escalate a blocker to the user", "orgId, question, urgency?(low|medium|high)", async (p) => {
     const org = h.resolveOrg(p.orgId as string);
-    if (!org) return "Org required. Pass orgId (org_personal, org_wyobi, org_apply).";
+    if (!org) return "Org required. Pass orgId (see org_list).";
     const severity = p.urgency === "high" ? "critical" : p.urgency === "medium" ? "warning" : "info";
     db.prepare(`INSERT INTO alerts (org_id, session_id, type, severity, message) VALUES (?, ?, 'question', ?, ?)`).run(org.id, deps.envSessionId ?? null, severity, p.question);
     return `Help request submitted to ${org.name} (${p.urgency ?? "medium"}).`;
@@ -666,9 +670,36 @@ export function buildActions(deps: GatewayDeps): Action[] {
     return "No actionable tasks. All tasks are in progress, completed, or blocked.";
   });
 
+  // ── Org Tools ──────────────────────────────────────────
+
+  register("org_list", "List organizations (user-defined) with ids, slugs and colours", "", async () => {
+    const orgs = listOrgs(db);
+    if (orgs.length === 0) return "No organizations.";
+    return ["# Organizations", "", ...orgs.map(o => {
+      const bound = deps.envOrgId === o.id ? " (this session)" : "";
+      return `- **${o.name}**${bound} id:${o.id} slug:${o.slug} color:${o.color} | API key env: ${orgApiKeyEnvName(o.slug)}`;
+    })].join("\n");
+  });
+
+  register("org_create", "Create a new organization (isolated projects, memory, alerts, brain)", "name, slug?([a-z0-9-], default from name), color?(#rrggbb)", async (p) => {
+    // A session bound to one org must not mint new orgs.
+    if (deps.envOrgId) return `Refused: this session is bound to ${deps.envOrgId}. Create orgs from the dashboard or an unbound client.`;
+    try {
+      const org = createOrg(db, {
+        name: String(p.name ?? ""),
+        slug: p.slug === undefined ? undefined : String(p.slug),
+        color: p.color === undefined ? undefined : String(p.color),
+      });
+      return `Created org "${org.name}" (id: ${org.id}, slug: ${org.slug}, color: ${org.color}).\nOptional per-org API key: set ${orgApiKeyEnvName(org.slug)} (16+ chars) in the server env.`;
+    } catch (err) {
+      if (err instanceof OrgError) return `Failed: ${err.message}`;
+      throw err;
+    }
+  });
+
   register("project_list", "List all projects in an org", "orgId", async (p) => {
     const org = h.resolveOrg(p.orgId as string);
-    if (!org) return "Pass orgId (org_personal, org_wyobi, org_apply).";
+    if (!org) return "Pass orgId (see org_list).";
     const rows = db.prepare(`SELECT p.id, p.name, p.path, ${projectLiveStatusSql("p")} as status, p.autonomy_level, p.token_budget, (SELECT COUNT(*) FROM sessions s WHERE s.project_id = p.id AND s.status = 'running') as active FROM projects p WHERE p.org_id = ? ORDER BY p.name`).all(org.id) as Array<Record<string, unknown>>;
     if (rows.length === 0) return `No projects in ${org.name}.`;
     return [`# Projects [${org.name}]`, "", ...rows.map(r => `- **${r.name}** (${r.status}) id:${(r.id as string)}\n  ${r.path} | Budget: ${(r.token_budget as number).toLocaleString("en-US")} | Active: ${r.active}`)].join("\n");
@@ -1076,7 +1107,7 @@ export function buildActions(deps: GatewayDeps): Action[] {
 
   register("session_msg", "Send a message to other sessions", "orgId, type(discovery|request|handoff|conflict|info), message, to?", async (p) => {
     const org = h.resolveOrg(p.orgId as string);
-    if (!org) return "Pass orgId (org_personal, org_wyobi, org_apply).";
+    if (!org) return "Pass orgId (see org_list).";
     const fromSession = deps.envSessionId ?? null;
     const toSession = (p.to as string) ?? null;
     const msgType = p.type as string;
@@ -1496,7 +1527,7 @@ export function dispatch(actions: Action[], action: string, query?: string, para
     const lines = [
       "# NoSleep Actions",
       "",
-      "Orgs: org_personal, org_wyobi, org_apply",
+      "Orgs are user-defined: call org_list for ids, org_create to add one.",
       "",
       ...actions.map(act => `**${act.name}** \u2014 ${act.description}\n  params: ${act.params}`),
     ];

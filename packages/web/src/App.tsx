@@ -12,6 +12,7 @@ import { StrategyPage } from "./pages/StrategyPage";
 import { StrategyGraphView } from "./pages/StrategyGraphView";
 import { Coordination } from "./pages/Coordination";
 import { Metrics } from "./pages/Metrics";
+import { Settings } from "./pages/Settings";
 
 // Brain pages — lazy-loaded so the dashboard shell + non-brain pages
 // don't pay the cost of d3-force, recharts, etc. on first paint.
@@ -135,6 +136,7 @@ export function App(): React.ReactElement {
         <Route path="alerts" element={<Alerts />} />
         <Route path="tokens" element={<TokenUsage />} />
         <Route path="metrics" element={<Metrics />} />
+        <Route path="settings" element={<Settings />} />
         <Route path="strategy" element={<StrategyPage />} />
         <Route path="strategy/graph" element={<StrategyGraphView />} />
 

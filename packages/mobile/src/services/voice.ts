@@ -10,6 +10,9 @@
  * audio artifact to replay the original audio.
  */
 
+import { Platform } from "react-native";
+import { report as clientLog } from "./clientLog";
+
 interface SpeechResultEvent {
   results?: Array<{ transcript: string }>;
   isFinal?: boolean;
@@ -71,14 +74,68 @@ interface AudioRecorderInstance {
   record(): void;
   stop(): Promise<void>;
 }
+/** expo-audio RecordingOptions: common fields + one block per platform. */
+interface RecordingPreset {
+  extension: string;
+  sampleRate: number;
+  numberOfChannels: number;
+  bitRate: number;
+  isMeteringEnabled?: boolean;
+  ios?: Record<string, unknown>;
+  android?: Record<string, unknown>;
+  web?: Record<string, unknown>;
+}
 interface AudioModuleShape {
-  AudioRecorder: new (options: unknown) => AudioRecorderInstance;
-  RecordingPresets: { HIGH_QUALITY: unknown; LOW_QUALITY: unknown };
+  // The recorder class is on `AudioModule`, not a top-level export.
+  AudioModule: { AudioRecorder?: new (options: unknown) => AudioRecorderInstance };
+  RecordingPresets: { HIGH_QUALITY: RecordingPreset; LOW_QUALITY: RecordingPreset };
   requestRecordingPermissionsAsync(): Promise<{ granted: boolean }>;
   setAudioModeAsync(mode: {
     allowsRecording?: boolean;
     playsInSilentMode?: boolean;
   }): Promise<void>;
+}
+
+/**
+ * Build an expo-audio recorder the way its `useAudioRecorder` hook does
+ * (`new AudioModule.AudioRecorder(platformOptions)`) — usable outside a
+ * component. The native constructor wants the preset flattened for the
+ * current platform (expo-audio's own flattener isn't exported). Returns null
+ * and reports to the server log on failure: this used to be
+ * `new mod.AudioRecorder()` — undefined — inside a silent catch, so no voice
+ * note ever produced an audio artifact.
+ */
+export function createAudioRecorder(
+  audioMod: AudioModuleShape,
+  os: string,
+): AudioRecorderInstance | null {
+  const Recorder = audioMod.AudioModule?.AudioRecorder;
+  if (typeof Recorder !== "function") {
+    clientLog("error", "voice.recorder", "expo-audio AudioModule.AudioRecorder is unavailable", { os });
+    return null;
+  }
+  const preset = audioMod.RecordingPresets.HIGH_QUALITY;
+  const platformBlock =
+    os === "ios" ? preset.ios : os === "android" ? preset.android : preset.web;
+  try {
+    return new Recorder({
+      extension: preset.extension,
+      sampleRate: preset.sampleRate,
+      numberOfChannels: preset.numberOfChannels,
+      bitRate: preset.bitRate,
+      isMeteringEnabled: preset.isMeteringEnabled ?? false,
+      ...platformBlock,
+    });
+  } catch (err) {
+    clientLog(
+      "error",
+      "voice.recorder",
+      err instanceof Error ? err.message : String(err),
+      { os },
+      err instanceof Error ? err.stack : undefined,
+    );
+    return null;
+  }
 }
 
 let cachedAudio: AudioModuleShape | null | undefined;
@@ -186,13 +243,23 @@ export async function startVoiceCapture(
           allowsRecording: true,
           playsInSilentMode: true,
         });
-        recorder = new audioMod.AudioRecorder(audioMod.RecordingPresets.HIGH_QUALITY);
-        await recorder.prepareToRecordAsync();
-        recorder.record();
-        recordStartedAt = Date.now();
+        recorder = createAudioRecorder(audioMod, Platform.OS);
+        if (recorder) {
+          await recorder.prepareToRecordAsync();
+          recorder.record();
+          recordStartedAt = Date.now();
+        }
       }
-    } catch {
-      // Continue without audio artifact — STT still works.
+    } catch (err) {
+      // Continue without audio artifact — STT still works. Reported so a
+      // broken recorder is visible in the server log, not silently lost.
+      clientLog(
+        "error",
+        "voice.recorder",
+        err instanceof Error ? err.message : String(err),
+        undefined,
+        err instanceof Error ? err.stack : undefined,
+      );
       recorder = null;
       recordStartedAt = null;
     }

@@ -81,7 +81,7 @@ const server = new McpServer({ name: "nosleep", version: "0.2.0" });
 
 server.tool(
   "nosleep",
-  `NoSleep orchestrator — manages sessions, strategy trees, projects, alerts, and memory across all orgs (personal, wyobi, apply).
+  `NoSleep orchestrator — manages sessions, strategy trees, projects, alerts, and memory across all orgs (user-defined — see org_list).
 
 Call with action="" or action="help" to list all available actions.
 Call with action="search" and query="keyword" to find relevant actions.

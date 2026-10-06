@@ -62,7 +62,7 @@ describe("GET /api/alerts", () => {
   it("filters alerts by orgId", async () => {
     const ids = seedMultiOrg(db);
     insertAlert(db, { orgId: ids.personal.orgId, message: "p1" });
-    insertAlert(db, { orgId: ids.wyobi.orgId, message: "w1" });
+    insertAlert(db, { orgId: ids.work.orgId, message: "w1" });
 
     const res = await app.inject({ method: "GET", url: "/api/alerts?orgId=org_personal" });
     const body = res.json() as { data: Array<{ message: string }> };
@@ -181,8 +181,8 @@ describe("POST /api/alerts/ack-all", () => {
   it("acks all unacked alerts when no orgId given", async () => {
     const ids = seedMultiOrg(db);
     insertAlert(db, { orgId: ids.personal.orgId });
-    insertAlert(db, { orgId: ids.wyobi.orgId });
-    insertAlert(db, { orgId: ids.apply.orgId });
+    insertAlert(db, { orgId: ids.work.orgId });
+    insertAlert(db, { orgId: ids.side.orgId });
 
     const res = await app.inject({ method: "POST", url: "/api/alerts/ack-all" });
     expect(res.statusCode).toBe(200);
@@ -196,7 +196,7 @@ describe("POST /api/alerts/ack-all", () => {
   it("only acks for the given org", async () => {
     const ids = seedMultiOrg(db);
     insertAlert(db, { orgId: ids.personal.orgId });
-    insertAlert(db, { orgId: ids.wyobi.orgId });
+    insertAlert(db, { orgId: ids.work.orgId });
 
     const res = await app.inject({ method: "POST", url: "/api/alerts/ack-all?orgId=org_personal" });
     expect(res.statusCode).toBe(200);
@@ -206,7 +206,7 @@ describe("POST /api/alerts/ack-all", () => {
       .get("org_personal") as { n: number };
     const unacked = db
       .prepare(`SELECT COUNT(*) as n FROM alerts WHERE acknowledged = 0 AND org_id = ?`)
-      .get("org_wyobi") as { n: number };
+      .get("org_work") as { n: number };
     expect(acked.n).toBe(1);
     expect(unacked.n).toBe(1);
   });

@@ -58,7 +58,7 @@ async function setup(opts: {
     directory: project,
     worktree: project,
     client: opts.client as never,
-    env: { NOSLEEP_URL: BASE, NOSLEEP_ORG_ID: "org_wyobi", ...opts.env },
+    env: { NOSLEEP_URL: BASE, NOSLEEP_ORG_ID: "org_work", ...opts.env },
     fetch: ff.fetch as never,
     configPath: join(project, "no-such-config.json"),
   })) as Record<string, (a?: unknown, b?: unknown) => Promise<void>>;
@@ -74,7 +74,7 @@ describe("session registration", () => {
     const reg = callTo("/api/sessions/register");
     expect(reg).toHaveLength(1);
     expect(reg[0].body).toEqual({
-      orgId: "org_wyobi",
+      orgId: "org_work",
       projectPath: project,
       claudeSessionId: "ses_A",
       cwd: project,
@@ -98,13 +98,13 @@ describe("session registration", () => {
   it("falls back to the installer-written nosleep.json for org/URL/project path", async () => {
     const project = tempProject();
     const cfgPath = join(project, "nosleep.json");
-    writeFileSync(cfgPath, JSON.stringify({ orgId: "org_apply", baseUrl: BASE, projectPath: "/repo/root" }));
+    writeFileSync(cfgPath, JSON.stringify({ orgId: "org_side", baseUrl: BASE, projectPath: "/repo/root" }));
     const ff = fakeFetch();
     const hooks = (await NoSleepPlugin({
       directory: project, worktree: project, env: {}, fetch: ff.fetch as never, configPath: cfgPath,
     })) as Record<string, (a?: unknown, b?: unknown) => Promise<void>>;
     await hooks["tool.execute.before"]({ tool: "bash", sessionID: "s", callID: "1" }, { args: {} });
-    expect(ff.callTo("/api/sessions/register")[0].body).toMatchObject({ orgId: "org_apply", projectPath: "/repo/root" });
+    expect(ff.callTo("/api/sessions/register")[0].body).toMatchObject({ orgId: "org_side", projectPath: "/repo/root" });
   });
 
   it("is disabled for brain-internal headless runs", async () => {
@@ -121,7 +121,7 @@ describe("tool.execute.before → /api/hooks/pre-tool", () => {
       { args: { filePath: "/p/a.ts", oldString: "a", newString: "b" } },
     );
     expect(callTo("/api/hooks/pre-tool")[0].body).toEqual({
-      orgId: "org_wyobi",
+      orgId: "org_work",
       sessionId: "manual_ns1",
       toolName: "Edit",
       toolInput: { filePath: "/p/a.ts", file_path: "/p/a.ts", oldString: "a", newString: "b" },
@@ -163,7 +163,7 @@ describe("tool.execute.after → /api/hooks/post-tool", () => {
       { title: "f", output: big, metadata: {} },
     );
     const body = callTo("/api/hooks/post-tool")[0].body;
-    expect(body).toMatchObject({ orgId: "org_wyobi", sessionId: "manual_ns1", toolName: "Read", toolInput: { file_path: "/f" } });
+    expect(body).toMatchObject({ orgId: "org_work", sessionId: "manual_ns1", toolName: "Read", toolInput: { file_path: "/f" } });
     expect(typeof body.toolResult).toBe("string");
     expect((body.toolResult as string).length).toBeLessThan(66000);
     expect(body.toolResult as string).toContain("original_size=70000");
@@ -194,7 +194,7 @@ describe("chat.message → /api/brain/hook-ingest/user-prompt", () => {
       ],
     });
     expect(callTo("/api/brain/hook-ingest/user-prompt")[0].body).toEqual({
-      orgId: "org_wyobi",
+      orgId: "org_work",
       sessionId: "manual_ns1",
       prompt: "fix the bug\nin auth.ts",
     });
@@ -216,7 +216,7 @@ describe("experimental.session.compacting → /api/hooks/pre-compact", () => {
     const output = { context: [] as string[] };
     await hooks["experimental.session.compacting"]({ sessionID: "ses_A" }, output);
 
-    expect(callTo("/api/hooks/pre-compact")[0].body).toEqual({ orgId: "org_wyobi", sessionId: "manual_ns1" });
+    expect(callTo("/api/hooks/pre-compact")[0].body).toEqual({ orgId: "org_work", sessionId: "manual_ns1" });
     expect(output.context).toHaveLength(1);
     expect(output.context[0]).toContain("Next task: T42");
   });
@@ -265,7 +265,7 @@ describe("session.idle → Stop-hook flow", () => {
       "/api/sessions/manual_ns1/decide-next",
       "/api/sessions/manual_ns1/schedule-wake",
     ]);
-    expect(callTo("/api/hooks/stop")[0].body).toEqual({ orgId: "org_wyobi", sessionId: "manual_ns1", stopReason: "end_turn" });
+    expect(callTo("/api/hooks/stop")[0].body).toEqual({ orgId: "org_work", sessionId: "manual_ns1", stopReason: "end_turn" });
     expect(callTo("/api/sessions/manual_ns1/schedule-wake")[0].body).toEqual({ delayMinutes: 15 });
   });
 

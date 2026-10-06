@@ -41,14 +41,14 @@ describe("GET /api/orgs", () => {
     db.close();
   });
 
-  it("returns the three seeded organizations", async () => {
+  it("returns the default org plus the user-defined test orgs", async () => {
     const res = await app.inject({ method: "GET", url: "/api/orgs" });
     expect(res.statusCode).toBe(200);
     const body = res.json() as { success: boolean; data: Array<{ id: string; slug: string }> };
     expect(body.success).toBe(true);
     expect(body.data).toHaveLength(3);
     const slugs = body.data.map((o) => o.slug).sort();
-    expect(slugs).toEqual(["apply", "personal", "wyobi"]);
+    expect(slugs).toEqual(["personal", "side", "work"]);
   });
 
   it("counts active sessions per org via sessions.org_id (no JOIN)", async () => {
@@ -69,16 +69,16 @@ describe("GET /api/orgs", () => {
     });
     insertSession(db, {
       id: "s3",
-      projectId: ids.wyobi.projectId,
-      orgId: ids.wyobi.orgId,
-      accountId: ids.wyobi.accountId,
+      projectId: ids.work.projectId,
+      orgId: ids.work.orgId,
+      accountId: ids.work.accountId,
       status: "running",
     });
     insertSession(db, {
       id: "s_done",
-      projectId: ids.apply.projectId,
-      orgId: ids.apply.orgId,
-      accountId: ids.apply.accountId,
+      projectId: ids.side.projectId,
+      orgId: ids.side.orgId,
+      accountId: ids.side.accountId,
       status: "completed",
     });
 
@@ -86,12 +86,12 @@ describe("GET /api/orgs", () => {
     const body = res.json() as { data: Array<{ id: string; activeSessions: number; projectCount: number }> };
 
     const personal = body.data.find((o) => o.id === "org_personal")!;
-    const wyobi = body.data.find((o) => o.id === "org_wyobi")!;
-    const apply = body.data.find((o) => o.id === "org_apply")!;
+    const work = body.data.find((o) => o.id === "org_work")!;
+    const side = body.data.find((o) => o.id === "org_side")!;
 
     expect(personal.activeSessions).toBe(2); // running + idle
-    expect(wyobi.activeSessions).toBe(1); // running
-    expect(apply.activeSessions).toBe(0); // completed doesn't count
+    expect(work.activeSessions).toBe(1); // running
+    expect(side.activeSessions).toBe(0); // completed doesn't count
   });
 
   it("counts unacknowledged alerts per org", async () => {

@@ -19,10 +19,10 @@ describe("memory org-isolation (trusted env org is authoritative)", () => {
 
   afterEach(() => db.close());
 
-  it("a wyobi-bound session storing with orgId=org_personal writes to WYOBI, not personal", async () => {
+  it("a work-bound session storing with orgId=org_personal writes to WORK, not personal", async () => {
     const actions: Action[] = buildActions({
       db,
-      envOrgId: "org_wyobi", // trusted binding
+      envOrgId: "org_work", // trusted binding
       serverUrl: "http://localhost:3777",
       apiKey: "test-key",
     });
@@ -31,39 +31,39 @@ describe("memory org-isolation (trusted env org is authoritative)", () => {
       orgId: "org_personal", // spoof attempt
       category: "fact",
       key: "spoofed",
-      value: "should land in wyobi",
+      value: "should land in work",
     });
 
-    const inWyobi = db.prepare(`SELECT value FROM memory WHERE key='spoofed' AND org_id='org_wyobi'`).get() as { value: string } | undefined;
+    const inWork = db.prepare(`SELECT value FROM memory WHERE key='spoofed' AND org_id='org_work'`).get() as { value: string } | undefined;
     const inPersonal = db.prepare(`SELECT value FROM memory WHERE key='spoofed' AND org_id='org_personal'`).get();
 
-    expect(inWyobi?.value).toBe("should land in wyobi");
+    expect(inWork?.value).toBe("should land in work");
     expect(inPersonal).toBeUndefined(); // the spoofed org was ignored
   });
 
-  it("a wyobi-bound session searching with orgId=org_personal sees only WYOBI memory", async () => {
+  it("a work-bound session searching with orgId=org_personal sees only WORK memory", async () => {
     const actions: Action[] = buildActions({
       db,
-      envOrgId: "org_wyobi",
+      envOrgId: "org_work",
       serverUrl: "http://localhost:3777",
       apiKey: "test-key",
     });
 
-    // seed has personal mem 'use-sqlite' and wyobi mem 'deploy-target'.
+    // seed has personal mem 'use-sqlite' and work mem 'deploy-target'.
     const result = await dispatch(actions, "memory_search", undefined, {
       orgId: "org_personal", // spoof — must be ignored
       query: "",
     });
 
-    expect(result.text).toContain("deploy-target"); // wyobi's
+    expect(result.text).toContain("deploy-target"); // work's
     expect(result.text).not.toContain("use-sqlite"); // personal's — must NOT leak
   });
 
-  it("a wyobi-bound session cannot delete a personal memory by id", async () => {
+  it("a work-bound session cannot delete a personal memory by id", async () => {
     const personalMem = db.prepare(`SELECT id FROM memory WHERE org_id='org_personal' LIMIT 1`).get() as { id: number };
     const actions: Action[] = buildActions({
       db,
-      envOrgId: "org_wyobi",
+      envOrgId: "org_work",
       serverUrl: "http://localhost:3777",
       apiKey: "test-key",
     });
@@ -74,7 +74,7 @@ describe("memory org-isolation (trusted env org is authoritative)", () => {
     });
 
     const stillThere = db.prepare(`SELECT 1 FROM memory WHERE id=?`).get(personalMem.id);
-    expect(stillThere).toBeDefined(); // delete was scoped to wyobi, personal row survives
+    expect(stillThere).toBeDefined(); // delete was scoped to work, personal row survives
   });
 
   it("without a trusted binding, caller orgId is still honored (backward compatible)", async () => {

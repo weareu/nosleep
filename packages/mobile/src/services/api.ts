@@ -1,5 +1,6 @@
 import { getServerConfig } from "../config";
 import { report as clientLog } from "./clientLog";
+import { setOrgs } from "./orgs";
 import type {
   Alert,
   LaunchSessionRequest,
@@ -101,8 +102,11 @@ async function patchJson<T>(path: string, body: unknown): Promise<T> {
 
 // ── Organizations ───────────────────────────────────────
 
-export function listOrgs(): Promise<OrgWithStats[]> {
-  return fetchJson<OrgWithStats[]>("/api/orgs");
+/** Fetch orgs and publish them to the org registry (names + colours app-wide). */
+export async function listOrgs(): Promise<OrgWithStats[]> {
+  const orgs = await fetchJson<OrgWithStats[]>("/api/orgs");
+  setOrgs(orgs);
+  return orgs;
 }
 
 // ── Sessions ────────────────────────────────────────────

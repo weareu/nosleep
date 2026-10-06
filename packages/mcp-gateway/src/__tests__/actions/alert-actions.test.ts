@@ -39,9 +39,9 @@ describe("alert actions", () => {
       expect(result.text).not.toContain("Build failed in work project");
     });
 
-    it("shows wyobi alerts only for wyobi org", async () => {
+    it("shows work alerts only for work org", async () => {
       const result = await dispatch(actions, "alert_list", undefined, {
-        orgId: "org_wyobi",
+        orgId: "org_work",
       });
       expect(result.text).toContain("Build failed in work project");
       expect(result.text).not.toContain("Session drifted");
@@ -49,7 +49,7 @@ describe("alert actions", () => {
 
     it("returns empty message when no alerts", async () => {
       const result = await dispatch(actions, "alert_list", undefined, {
-        orgId: "org_apply",
+        orgId: "org_side",
       });
       expect(result.text).toBe("No alerts.");
     });
@@ -105,9 +105,9 @@ describe("alert actions", () => {
         orgId: "org_personal",
       });
 
-      // Wyobi alert should still be unacked
-      const wyobiUnacked = db.prepare(`SELECT COUNT(*) as cnt FROM alerts WHERE org_id = 'org_wyobi' AND acknowledged = 0`).get() as { cnt: number };
-      expect(wyobiUnacked.cnt).toBe(1);
+      // Work alert should still be unacked
+      const workUnacked = db.prepare(`SELECT COUNT(*) as cnt FROM alerts WHERE org_id = 'org_work' AND acknowledged = 0`).get() as { cnt: number };
+      expect(workUnacked.cnt).toBe(1);
     });
 
     it("requires orgId", async () => {

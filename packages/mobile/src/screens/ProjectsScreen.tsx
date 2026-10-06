@@ -11,10 +11,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { OrgBadge } from "../components/OrgBadge";
 import { StatusDot } from "../components/StatusDot";
-import { listProjects } from "../services/api";
+import { listOrgs, listProjects } from "../services/api";
 import { useRefresh } from "../hooks/useRefresh";
-import { colors, getOrgColor, ORG_NAMES } from "../theme";
-import { FAB_CONTENT_INSET } from "../components/GlobalMicFab";
+import { colors, getOrgColor, getOrgName } from "../theme";
 import type { Project } from "../types";
 
 interface ProjectSection {
@@ -30,7 +29,7 @@ export function ProjectsScreen(): React.JSX.Element {
 
   const loadData = useCallback(async () => {
     try {
-      const projects = await listProjects();
+      const [projects, orgs] = await Promise.all([listProjects(), listOrgs()]);
 
       // Group by org
       const grouped = new Map<string, Project[]>();
@@ -39,11 +38,16 @@ export function ProjectsScreen(): React.JSX.Element {
         grouped.set(project.orgId, [...existing, project]);
       }
 
-      const orgOrder = ["org_personal", "org_wyobi", "org_apply"];
+      // Server org order (user-defined orgs); any org id not in the list
+      // (e.g. deleted mid-refresh) still shows, after the known ones.
+      const orgOrder = [
+        ...orgs.map((o) => o.id),
+        ...[...grouped.keys()].filter((id) => !orgs.some((o) => o.id === id)),
+      ];
       const result: ProjectSection[] = orgOrder
         .filter((orgId) => grouped.has(orgId))
         .map((orgId) => ({
-          title: ORG_NAMES[orgId] ?? orgId,
+          title: getOrgName(orgId),
           orgId,
           orgColor: getOrgColor(orgId),
           data: grouped.get(orgId) ?? [],
@@ -112,7 +116,7 @@ export function ProjectsScreen(): React.JSX.Element {
                       item.autonomyLevel === "full"
                         ? `${colors.success}20`
                         : item.autonomyLevel === "supervised"
-                          ? `${colors.wyobi}20`
+                          ? `${colors.severityWarning}20`
                           : `${colors.textMuted}20`,
                   },
                 ]}
@@ -125,7 +129,7 @@ export function ProjectsScreen(): React.JSX.Element {
                         item.autonomyLevel === "full"
                           ? colors.success
                           : item.autonomyLevel === "supervised"
-                            ? colors.wyobi
+                            ? colors.severityWarning
                             : colors.textMuted,
                     },
                   ]}
@@ -229,8 +233,7 @@ const styles = StyleSheet.create({
     marginLeft: 32,
   },
   listContent: {
-    // Clear the floating mic button so the last rows/badges aren't covered.
-    paddingBottom: FAB_CONTENT_INSET,
+    paddingBottom: 20,
   },
   emptyText: {
     color: colors.textMuted,

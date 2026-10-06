@@ -7,8 +7,8 @@ description: Register the current project in NoSleep and load its strategy/plan 
 
 NoSleep is the autonomous orchestrator at `http://localhost:3777` (web dashboard
 at `http://localhost:5173`). It tracks projects, strategy trees, sessions, and
-budgets across isolated orgs (`org_personal`, `org_wyobi`, `org_apply` — list them via
-`GET /api/orgs`).
+budgets across isolated, user-defined orgs. Never assume org ids — discover them
+with `nosleep(action="org_list")` (or `GET /api/orgs`).
 
 ## The contract (why this skill exists)
 
@@ -36,8 +36,12 @@ tree must reference the doc (`sourceRef`). Done = the tree is visible via
 nosleep(action="project_list", params={orgId: "<org>"})
 ```
 
-Check every org if unsure. Pick the org by ownership (which client/company the
-work belongs to), not by directory. Only ask the user if genuinely ambiguous.
+Get the org ids from `nosleep(action="org_list")` and check every org if unsure.
+Pick the org by ownership (which client/company the work belongs to), not by
+directory. If the owning org doesn't exist yet, create it with
+`nosleep(action="org_create", params={name: "<Org Name>"})` (sessions bound to
+an org can't — then ask the user to add it in Settings → Organizations). Only
+ask the user if genuinely ambiguous.
 
 ### 2. Register if missing
 

@@ -9,7 +9,7 @@ import {
 } from "../../memory-ops.js";
 
 const ORG_PERSONAL = "org_personal";
-const ORG_WYOBI = "org_wyobi";
+const ORG_WORK = "org_work";
 
 describe("org isolation", () => {
   let db: Database.Database;
@@ -24,16 +24,16 @@ describe("org isolation", () => {
       value: "Personal org secret data",
     });
 
-    // Store memory in org_wyobi
-    storeMemory(db, ORG_WYOBI, {
+    // Store memory in org_work
+    storeMemory(db, ORG_WORK, {
       category: "fact",
-      key: "secret-wyobi",
-      value: "Wyobi org secret data",
+      key: "secret-work",
+      value: "Work org secret data",
     });
   });
 
-  it("memory in org_personal is NOT visible from org_wyobi", () => {
-    const result = retrieveMemory(db, ORG_WYOBI, {
+  it("memory in org_personal is NOT visible from org_work", () => {
+    const result = retrieveMemory(db, ORG_WORK, {
       query: "secret-personal",
       limit: 10,
     });
@@ -41,9 +41,9 @@ describe("org isolation", () => {
     expect(result.content[0].text).toContain("No memories found");
   });
 
-  it("memory in org_wyobi is NOT visible from org_personal", () => {
+  it("memory in org_work is NOT visible from org_personal", () => {
     const result = retrieveMemory(db, ORG_PERSONAL, {
-      query: "secret-wyobi",
+      query: "secret-work",
       limit: 10,
     });
 
@@ -52,13 +52,13 @@ describe("org isolation", () => {
 
   it("each org only sees its own memories in list", () => {
     const personalList = listMemory(db, ORG_PERSONAL, {});
-    const wyobiList = listMemory(db, ORG_WYOBI, {});
+    const workList = listMemory(db, ORG_WORK, {});
 
     expect(personalList.content[0].text).toContain("secret-personal");
-    expect(personalList.content[0].text).not.toContain("secret-wyobi");
+    expect(personalList.content[0].text).not.toContain("secret-work");
 
-    expect(wyobiList.content[0].text).toContain("secret-wyobi");
-    expect(wyobiList.content[0].text).not.toContain("secret-personal");
+    expect(workList.content[0].text).toContain("secret-work");
+    expect(workList.content[0].text).not.toContain("secret-personal");
   });
 
   it("search returns only same-org results", () => {
@@ -67,26 +67,26 @@ describe("org isolation", () => {
       query: "secret",
       limit: 10,
     });
-    const wyobiResults = retrieveMemory(db, ORG_WYOBI, {
+    const workResults = retrieveMemory(db, ORG_WORK, {
       query: "secret",
       limit: 10,
     });
 
     expect(personalResults.content[0].text).toContain("secret-personal");
-    expect(personalResults.content[0].text).not.toContain("secret-wyobi");
+    expect(personalResults.content[0].text).not.toContain("secret-work");
 
-    expect(wyobiResults.content[0].text).toContain("secret-wyobi");
-    expect(wyobiResults.content[0].text).not.toContain("secret-personal");
+    expect(workResults.content[0].text).toContain("secret-work");
+    expect(workResults.content[0].text).not.toContain("secret-personal");
   });
 
-  it("delete in org_personal does NOT affect org_wyobi", () => {
+  it("delete in org_personal does NOT affect org_work", () => {
     // Get the personal memory ID
     const personalRow = db
       .prepare("SELECT id FROM memory WHERE org_id = ? AND key = ?")
       .get(ORG_PERSONAL, "secret-personal") as { id: string };
 
-    // Try to delete it from org_wyobi (should fail silently)
-    const crossOrgResult = deleteMemory(db, ORG_WYOBI, { id: personalRow.id });
+    // Try to delete it from org_work (should fail silently)
+    const crossOrgResult = deleteMemory(db, ORG_WORK, { id: personalRow.id });
     expect(crossOrgResult.content[0].text).toContain("not found");
 
     // Verify it still exists in org_personal
@@ -112,11 +112,11 @@ describe("org isolation", () => {
     });
     expect(gone.content[0].text).toContain("No memories found");
 
-    // Verify org_wyobi data is untouched
-    const wyobiStillThere = retrieveMemory(db, ORG_WYOBI, {
-      query: "secret-wyobi",
+    // Verify org_work data is untouched
+    const workStillThere = retrieveMemory(db, ORG_WORK, {
+      query: "secret-work",
       limit: 10,
     });
-    expect(wyobiStillThere.content[0].text).toContain("secret-wyobi");
+    expect(workStillThere.content[0].text).toContain("secret-work");
   });
 });

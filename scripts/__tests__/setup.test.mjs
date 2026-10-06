@@ -15,15 +15,28 @@ let base;
 let reply = '{"ok": true, "sum": 5}';
 let status = 200;
 const requests = [];
+let orgs = [];
 
 beforeAll(async () => {
   server = createServer((req, res) => {
     let body = "";
     req.on("data", (c) => { body += c; });
     req.on("end", () => {
-      requests.push({ method: req.method, url: req.url, auth: req.headers.authorization, body });
+      requests.push({ method: req.method, url: req.url, auth: req.headers.authorization, apiKey: req.headers["x-api-key"], body });
       res.setHeader("content-type", "application/json");
       if (req.url === "/health") return res.end('{"status":"ok"}');
+      if (req.url === "/api/orgs" && req.method === "GET") {
+        return res.end(JSON.stringify({ success: true, data: orgs }));
+      }
+      if (req.url === "/api/orgs" && req.method === "POST") {
+        const b = JSON.parse(body);
+        const slug = b.slug ?? b.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+        if (orgs.some((o) => o.slug === slug)) { res.statusCode = 409; return res.end(JSON.stringify({ success: false, error: `slug "${slug}" exists` })); }
+        const org = { id: `org_${slug}`, name: b.name, slug, color: b.color ?? "#ec4899", apiKeyEnv: `NOSLEEP_API_KEY_${slug.toUpperCase().replace(/-/g, "_")}` };
+        orgs.push(org);
+        res.statusCode = 201;
+        return res.end(JSON.stringify({ success: true, data: org }));
+      }
       if (status !== 200) { res.statusCode = status; return res.end("{}"); }
       if (req.method === "GET" && req.url === "/v1/models") {
         return res.end(JSON.stringify({ data: [{ id: "tiny:1b" }, { id: "qwen2.5:7b-instruct" }, { id: "qwen2.5vl:7b" }] }));
@@ -35,6 +48,10 @@ beforeAll(async () => {
       res.end("{}");
     });
   });
+  // Node's default 5s keep-alive lets the server close a pooled socket just as
+  // undici reuses it under a loaded parallel run ("fetch failed"). Keep idle
+  // sockets alive for the life of the suite.
+  server.keepAliveTimeout = 120_000;
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${server.address().port}/v1`;
   const tmp = createServer();
@@ -43,7 +60,10 @@ beforeAll(async () => {
   await new Promise((r) => tmp.close(r));
 });
 afterAll(() => new Promise((r) => server.close(r)));
-beforeEach(() => { reply = '{"ok": true, "sum": 5}'; status = 200; requests.length = 0; });
+beforeEach(() => {
+  reply = '{"ok": true, "sum": 5}'; status = 200; requests.length = 0;
+  orgs = [{ id: "org_personal", name: "Personal", slug: "personal", color: "#6366f1" }];
+});
 
 let deadUrl; // a port that was just freed: connection refused
 
@@ -300,6 +320,48 @@ describe("setup CLI", () => {
     const env = parseEnv(readFileSync(join(root, ".env"), "utf8"));
     expect(env).toMatchObject({ NOSLEEP_BRAIN_DISABLE_TRIAGE: "1", NOSLEEP_BRAIN_CONSOLIDATE: "dry-run" });
     expect(existsSync(join(root, "data"))).toBe(false); // never creates data/
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+// ── organizations step ───────────────────────────────────────────
+describe("orgs step", () => {
+  const orgRoot = () => tempRoot({ env: `PORT=${server.address().port}\nNOSLEEP_API_KEY=setup-key\nNOSLEEP_HOOK_SECRET=s\n` });
+  const posts = () => requests.filter((r) => r.method === "POST" && r.url === "/api/orgs");
+
+  it("lists existing orgs and creates new ones through the server API", async () => {
+    const root = orgRoot();
+    const o = collect();
+    // configure? y · create? y · Client X, slug blank, colour blank · create? y · empty name (rejected) · create? y · duplicate · create? n
+    await runSetup({ argv: ["--steps", "orgs", "--root", root], out: o.out,
+      prompter: scripted(["y", "y", "Client X", "", "", "y", "", "y", "Again", "client-x", "", "n"]) });
+    expect(o.text()).toContain("Organizations: you have 1: Personal (org_personal)");
+    expect(o.text()).toContain("created Client X (org_client-x, #ec4899)");
+    expect(o.text()).toContain("NOSLEEP_API_KEY_CLIENT_X");
+    expect(o.text()).toMatch(/name must be 1-60 characters/);
+    expect(o.text()).toMatch(/not created: slug "client-x" exists/);
+    expect(posts().map((r) => JSON.parse(r.body))).toEqual([{ name: "Client X" }, { name: "Again", slug: "client-x" }]);
+    expect(posts().every((r) => r.apiKey === "setup-key")).toBe(true);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("--yes creates nothing, --dry-run only plans", async () => {
+    const root = orgRoot();
+    await runSetup({ argv: ["--yes", "--steps", "orgs", "--root", root], out: () => {} });
+    expect(posts()).toEqual([]);
+    const o = collect();
+    await runSetup({ argv: ["--dry-run", "--steps", "orgs", "--root", root], out: o.out, prompter: scripted(["y", "y", "Side", "", "", "n"]) });
+    expect(posts()).toEqual([]);
+    expect(o.text()).toContain('would run: POST /api/orgs {"name":"Side"}');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("explains how to continue when the server is down", async () => {
+    const root = orgRoot();
+    const o = collect();
+    await runSetup({ argv: ["--steps", "orgs", "--root", root], out: o.out, prompter: scripted(["y"]),
+      fetchImpl: async () => { throw new Error("connect ECONNREFUSED"); } });
+    expect(o.text()).toMatch(/Server not reachable \(connect ECONNREFUSED\).*--steps orgs/);
     rmSync(root, { recursive: true, force: true });
   });
 });

@@ -36,7 +36,7 @@ NoSleep is the layer *around* sessions: memory, scheduling, and oversight.
 | **Hooks** | Claude Code hooks (pre/post tool, prompt, stop, pre-compact) stream activity to the server for live monitoring, token tracking, drift detection and goal re-injection. Installed per project from the dashboard. |
 | **Loops & schedules** | Per-project auto-loops (`/nosleep-go`, `/nosleep-pause`) and cron schedules, with a no-progress guard and branch auto-stop. |
 | **Coordination** | Running sessions see each other: file locks (`file_lock`/`file_check`), a message board (`session_msg`, `session_inbox`, `session_peers`), redirect/stop, and an escalation queue where agents ask you a question (`request_help`) and you answer from dashboard or phone. |
-| **Org isolation** | Three hard-isolated orgs (projects, memory, alerts, keys never cross). |
+| **Org isolation** | User-defined, hard-isolated orgs (projects, memory, alerts, Brain, keys never cross). Starts with **Personal**; add more in Settings → Organizations, the setup wizard, `POST /api/orgs`, or the `org_create` MCP action. |
 | **Budget pacing** | Billing-cycle-aware daily allowance; NORMAL → LEAN → RESTRICTED → PAUSED. |
 | **Validation** | Haiku-based completeness check + stub heuristics on session exit; auto-retry (max 2) and auto-advance the tree on success. |
 | **Research** | Optional NotebookLM MCP server to offload documentation research to the free Gemini backend. |
@@ -263,7 +263,7 @@ contribution.
 | `DB_PATH` | `./data/nosleep.db` | SQLite database (WAL mode) |
 | `NOSLEEP_API_KEY` | generated | Required `x-api-key` for non-loopback clients. Unset = open dev mode |
 | `NOSLEEP_HOOK_SECRET` | generated | Authenticates hook callbacks |
-| `NOSLEEP_API_KEY_<ORG>` | — | Optional per-org keys (`PERSONAL`, `WYOBI`, `APPLY`) scoping a client to one org |
+| `NOSLEEP_API_KEY_<ORG>` | — | Optional per-org key for ANY org: `<ORG>` is the org slug upper-cased with `-` → `_` (`personal` → `NOSLEEP_API_KEY_PERSONAL`, `client-x` → `NOSLEEP_API_KEY_CLIENT_X`; min 16 chars). Scopes a client to that org; resolved per request, so orgs created after boot work without a restart. `GET /api/orgs` shows each org's `apiKeyEnv` |
 | `ANTHROPIC_API_KEY` | — | Only for API-billed accounts; Pro/Max use the CLI login |
 | `NOSLEEP_DATA_DIR` | `./data` | Brain storage root |
 | `NOSLEEP_LLM_PROVIDER[_BRAIN\|_VALIDATOR\|_RESPONDER\|_VISION]` | `claude` | Route background AI to an OpenAI-compatible endpoint (`openai`) |
@@ -348,7 +348,7 @@ Read [docs/known-issues.md](docs/known-issues.md) before running this 24/7. The 
   re-injection and recall on launch.
 - **Memory rot at scale is unsolved.** Dedup and sleep-time archiving shrink the
   pile, but nothing yet measures or guarantees retrieval quality as the Brain grows.
-- Orgs are fixed to three slots. It's a single machine and single user.
+- It's a single machine and single user.
   Windows and Android are beta.
 
 ## License

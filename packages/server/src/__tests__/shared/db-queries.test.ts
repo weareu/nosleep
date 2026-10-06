@@ -111,7 +111,7 @@ describe("Strategy node queries", () => {
   it("getStrategyNodeInOrg filters by org_id", () => {
     insertNode(db, { id: "n1", projectId, orgId, title: "T" });
     expect(getStrategyNodeInOrg(db, "n1", orgId)?.title).toBe("T");
-    expect(getStrategyNodeInOrg(db, "n1", "org_wyobi")).toBeUndefined();
+    expect(getStrategyNodeInOrg(db, "n1", "org_work")).toBeUndefined();
   });
 
   it("listProjectStrategy returns nodes ordered by priority then sort_order", () => {
@@ -206,7 +206,7 @@ describe("Session queries", () => {
   });
 
   it("sessionInOrg false when session is in a different org", () => {
-    expect(sessionInOrg(db, "s1", "org_wyobi")).toBe(false);
+    expect(sessionInOrg(db, "s1", "org_work")).toBe(false);
   });
 });
 
@@ -273,7 +273,7 @@ describe("Alert queries", () => {
 
   it("acknowledgeAlert returns false when alert is in different org", () => {
     const id = insertAlert(db, { orgId });
-    expect(acknowledgeAlert(db, id, "org_wyobi")).toBe(false);
+    expect(acknowledgeAlert(db, id, "org_work")).toBe(false);
   });
 
   it("acknowledgeAlert returns false for unknown id", () => {
@@ -289,10 +289,10 @@ describe("Alert queries", () => {
 
   it("acknowledgeAllOrgAlerts only affects the given org", () => {
     insertAlert(db, { orgId });
-    insertAlert(db, { orgId: "org_wyobi" });
+    insertAlert(db, { orgId: "org_work" });
     acknowledgeAllOrgAlerts(db, orgId);
-    const wyobiUnacked = db.prepare(`SELECT COUNT(*) as n FROM alerts WHERE org_id = 'org_wyobi' AND acknowledged = 0`).get() as { n: number };
-    expect(wyobiUnacked.n).toBe(1);
+    const workUnacked = db.prepare(`SELECT COUNT(*) as n FROM alerts WHERE org_id = 'org_work' AND acknowledged = 0`).get() as { n: number };
+    expect(workUnacked.n).toBe(1);
   });
 });
 
@@ -328,6 +328,6 @@ describe("Token budget queries", () => {
       INSERT INTO sessions (id, project_id, org_id, account_id, status, goal_text, goal_hash)
       VALUES ('s1', ?, ?, ?, 'running', 'g', 'h')
     `).run(projectId, orgId, accountId);
-    expect(getSessionBudget(db, "s1", "org_wyobi")).toBeUndefined();
+    expect(getSessionBudget(db, "s1", "org_work")).toBeUndefined();
   });
 });

@@ -84,8 +84,8 @@ describe("GET /api/sessions", () => {
   it("filters sessions by org_id directly (not via project JOIN)", async () => {
     const ids = seedMultiOrg(db);
     insertSession(db, { id: "s_p", projectId: ids.personal.projectId, orgId: ids.personal.orgId, accountId: ids.personal.accountId, status: "running" });
-    insertSession(db, { id: "s_w", projectId: ids.wyobi.projectId, orgId: ids.wyobi.orgId, accountId: ids.wyobi.accountId, status: "running" });
-    insertSession(db, { id: "s_a", projectId: ids.apply.projectId, orgId: ids.apply.orgId, accountId: ids.apply.accountId, status: "running" });
+    insertSession(db, { id: "s_w", projectId: ids.work.projectId, orgId: ids.work.orgId, accountId: ids.work.accountId, status: "running" });
+    insertSession(db, { id: "s_a", projectId: ids.side.projectId, orgId: ids.side.orgId, accountId: ids.side.accountId, status: "running" });
 
     const res = await app.inject({ method: "GET", url: "/api/sessions?orgId=org_personal" });
     const body = res.json() as { data: Array<{ id: string }> };
@@ -97,7 +97,7 @@ describe("GET /api/sessions", () => {
     const ids = seedMultiOrg(db);
     insertSession(db, { id: "s1", projectId: ids.personal.projectId, orgId: ids.personal.orgId, accountId: ids.personal.accountId, status: "running" });
     insertSession(db, { id: "s2", projectId: ids.personal.projectId, orgId: ids.personal.orgId, accountId: ids.personal.accountId, status: "completed" });
-    insertSession(db, { id: "s3", projectId: ids.wyobi.projectId, orgId: ids.wyobi.orgId, accountId: ids.wyobi.accountId, status: "running" });
+    insertSession(db, { id: "s3", projectId: ids.work.projectId, orgId: ids.work.orgId, accountId: ids.work.accountId, status: "running" });
 
     const res = await app.inject({ method: "GET", url: "/api/sessions?status=running" });
     const body = res.json() as { data: Array<{ id: string }> };
@@ -108,7 +108,7 @@ describe("GET /api/sessions", () => {
     const ids = seedMultiOrg(db);
     insertSession(db, { id: "s1", projectId: ids.personal.projectId, orgId: ids.personal.orgId, accountId: ids.personal.accountId, status: "running" });
     insertSession(db, { id: "s2", projectId: ids.personal.projectId, orgId: ids.personal.orgId, accountId: ids.personal.accountId, status: "completed" });
-    insertSession(db, { id: "s3", projectId: ids.wyobi.projectId, orgId: ids.wyobi.orgId, accountId: ids.wyobi.accountId, status: "running" });
+    insertSession(db, { id: "s3", projectId: ids.work.projectId, orgId: ids.work.orgId, accountId: ids.work.accountId, status: "running" });
 
     const res = await app.inject({
       method: "GET",

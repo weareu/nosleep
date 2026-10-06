@@ -72,9 +72,9 @@ packages/server/package.json                            # add deps: better-sqlit
 │   ├── sealed/
 │   │   └── sealed-2026-Q1.db              # (created by seal job, Phase 8)
 │   └── blobs/                              # optional CAS for large binaries >N MB (Phase 5)
-├── org_wyobi/
+├── org_work/
 │   └── …
-└── org_apply/
+└── org_<slug>/      # one dir per user-defined org
     └── …
 ```
 

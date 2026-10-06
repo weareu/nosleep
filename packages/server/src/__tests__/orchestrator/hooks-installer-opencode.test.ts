@@ -51,7 +51,7 @@ describe("installHooks — target resolution", () => {
   it("explicit targets win over detection (OpenCode only)", () => {
     const project = tempProject();
 
-    installHooks(project, { serverPort: 3777, orgId: "org_wyobi", targets: ["opencode"] });
+    installHooks(project, { serverPort: 3777, orgId: "org_work", targets: ["opencode"] });
 
     expect(existsSync(join(project, ".claude", "nosleep-hooks"))).toBe(false);
     expect(existsSync(join(project, ".claude", "settings.local.json"))).toBe(false);
@@ -66,10 +66,10 @@ describe("installHooks — target resolution", () => {
 describe("installHooks — opencode target output", () => {
   it("writes plugin config with org, server URL and project path", () => {
     const project = tempProject();
-    installHooks(project, { serverPort: 4100, orgId: "org_apply", targets: ["opencode"] });
+    installHooks(project, { serverPort: 4100, orgId: "org_side", targets: ["opencode"] });
 
     expect(readJson(join(project, ".opencode", "nosleep.json"))).toEqual({
-      orgId: "org_apply",
+      orgId: "org_side",
       baseUrl: "http://localhost:4100",
       projectPath: project,
     });
@@ -120,7 +120,7 @@ describe("installHooks — opencode target output", () => {
       JSON.stringify({ model: "x/y", mcp: { other: { type: "local", command: ["foo"] } } }),
     );
 
-    installHooks(project, { serverPort: 3777, orgId: "org_wyobi" });
+    installHooks(project, { serverPort: 3777, orgId: "org_work" });
 
     const cfg = readJson(join(project, ".opencode", "opencode.json"));
     expect(cfg.model).toBe("x/y");
@@ -129,7 +129,7 @@ describe("installHooks — opencode target output", () => {
       type: "remote",
       url: "http://localhost:3777/api/mcp",
       enabled: true,
-      headers: { "x-nosleep-org": "org_wyobi" },
+      headers: { "x-nosleep-org": "org_work" },
     });
   });
 

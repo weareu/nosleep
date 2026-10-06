@@ -11,7 +11,7 @@
  *                                          ~/.claude, autostart or the live server only PRINT then.
  *
  * Steps: llm (memory/background AI routing), brain, research (NotebookLM),
- * claude (Claude Code / OpenCode integration), mobile, service, doctor.
+ * claude (Claude Code / OpenCode integration), mobile, service, orgs (organizations), doctor.
  * Docs: docs/setup.md.
  */
 import { spawn, spawnSync } from "node:child_process";
@@ -30,7 +30,7 @@ import {
 } from "./doctor.mjs";
 
 export const PURPOSES = ["brain", "validator", "responder", "vision"];
-export const STEP_IDS = ["llm", "brain", "research", "claude", "mobile", "service", "doctor"];
+export const STEP_IDS = ["llm", "brain", "research", "claude", "mobile", "service", "orgs", "doctor"];
 const OLLAMA_URL = "http://localhost:11434/v1";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1";
 const IS_WIN = platform() === "win32";
@@ -563,7 +563,79 @@ export async function stepService(ctx) {
   installService({ dryRun: ctx.dryRun, claudeBin: which("claude") });
 }
 
-// ── step 7: doctor (+ optional start) ──────────────────────────────
+// ── step 7: organizations ──────────────────────────────────────────
+
+const ORG_NAME_MAX = 60;
+
+function describeFetchError(err) {
+  const cause = err?.cause?.code ?? err?.cause?.message;
+  return cause ? `${err.message} (${cause})` : String(err?.message ?? err);
+}
+
+/** GET/POST /api/orgs on the server this root's .env points at. */
+async function orgsApi(ctx, method, body) {
+  const fileEnv = parseEnv(ctx.envFile.body);
+  const port = Number(fileEnv.PORT) || SERVER_PORT;
+  const headers = { "content-type": "application/json" };
+  if (fileEnv.NOSLEEP_API_KEY) headers["x-api-key"] = fileEnv.NOSLEEP_API_KEY;
+  const send = () => ctx.fetchImpl(`http://127.0.0.1:${port}/api/orgs`, {
+    method, headers, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(5000),
+  });
+  let res;
+  try {
+    res = await send();
+  } catch (err) {
+    // A pooled keep-alive socket the server just closed surfaces as a bare
+    // "fetch failed"; one retry is safe for the idempotent GET.
+    if (method !== "GET") throw new Error(describeFetchError(err));
+    try { res = await send(); } catch (err2) { throw new Error(describeFetchError(err2)); }
+  }
+  const json = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data: json.data, error: json.error };
+}
+
+/**
+ * Orgs are user-defined and live in the server DB, so this step talks to the
+ * running server (the same /api/orgs the dashboard uses — slug/colour rules
+ * are enforced there). A root override without its own PORT would hit the
+ * live server's default port, so it only prints then.
+ */
+export async function stepOrgs(ctx) {
+  let orgs;
+  try {
+    const r = await orgsApi(ctx, "GET");
+    if (!r.ok) throw new Error(r.error || `HTTP ${r.status}`);
+    orgs = r.data ?? [];
+  } catch (err) {
+    say(ctx, `  Server not reachable (${err.message ?? err}). Start it, then re-run: npm run setup -- --steps orgs`);
+    return say(ctx, "  You can also add orgs later in the dashboard (Settings → Organizations) or via POST /api/orgs.");
+  }
+  say(ctx, `  Organizations: you have ${orgs.length}: ${orgs.map((o) => `${o.name} (${o.id})`).join(", ")}`);
+  say(ctx, "  Each org isolates its projects, sessions, memory, alerts and Brain.");
+  const printOnly = ctx.dryRun || (ctx.sandboxed && !parseEnv(ctx.envFile.body).PORT);
+  while (await ctx.p.confirm("Create another organization?", false)) {
+    const name = (await ctx.p.ask("Name", "")).trim();
+    if (!name || name.length > ORG_NAME_MAX) { say(ctx, `  !! name must be 1-${ORG_NAME_MAX} characters`); continue; }
+    const slug = (await ctx.p.ask("Slug: a-z, 0-9, '-' (blank = derived from the name)", "")).trim();
+    const color = (await ctx.p.ask("Colour #rrggbb (blank = automatic)", "")).trim();
+    const body = { name, ...(slug ? { slug } : {}), ...(color ? { color } : {}) };
+    if (printOnly) {
+      ctx.planned.push(`POST /api/orgs ${JSON.stringify(body)}`);
+      say(ctx, `  would create ${JSON.stringify(body)}`);
+      continue;
+    }
+    try {
+      const r = await orgsApi(ctx, "POST", body);
+      if (!r.ok) { say(ctx, `  !! not created: ${r.error || `HTTP ${r.status}`}`); continue; }
+      say(ctx, `  created ${r.data.name} (${r.data.id}, ${r.data.color})`);
+      if (r.data.apiKeyEnv) say(ctx, `  optional per-org API key: set ${r.data.apiKeyEnv}=<16+ chars> in .env and restart the server`);
+    } catch (err) {
+      say(ctx, `  !! not created: ${err.message ?? err}`);
+    }
+  }
+}
+
+// ── step 8: doctor (+ optional start) ──────────────────────────────
 
 function startServer(ctx) {
   const os = platform();
@@ -595,6 +667,7 @@ const STEPS = {
   claude: ["Claude Code / OpenCode integration", stepClaude],
   mobile: ["Mobile app build config", stepMobile],
   service: ["Autostart", stepService],
+  orgs: ["Organizations", stepOrgs],
   doctor: ["Verify (doctor)", stepDoctor],
 };
 

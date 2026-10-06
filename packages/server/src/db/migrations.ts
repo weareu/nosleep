@@ -20,6 +20,13 @@ export interface Migration {
   readonly version: number;
   readonly name: string;
   readonly up: (db: Database.Database) => void;
+  /**
+   * Run with `PRAGMA foreign_keys = OFF` (table rebuilds that drop a parent
+   * table). The pragma is a no-op inside a transaction, so the runner flips it
+   * around the transaction, runs `foreign_key_check` before COMMIT (any NEW
+   * violation rolls the migration back), and restores the previous setting.
+   */
+  readonly foreignKeysOff?: boolean;
 }
 
 /**
@@ -64,10 +71,28 @@ export function runMigrations(db: Database.Database, migrations: readonly Migrat
   let appliedCount = 0;
   for (const m of migrations) {
     if (applied.has(m.version)) continue;
-    db.transaction(() => {
-      m.up(db);
-      insertApplied.run(m.version, m.name);
-    })();
+    const fkWasOn = m.foreignKeysOff ? db.pragma("foreign_keys", { simple: true }) === 1 : false;
+    if (fkWasOn) db.pragma("foreign_keys = OFF");
+    try {
+      db.transaction(() => {
+        // Pre-existing orphans (from before FKs were enforced) must not brick
+        // boot — the migration only fails if it ADDED violations.
+        const before = m.foreignKeysOff ? (db.pragma("foreign_key_check") as unknown[]).length : 0;
+        m.up(db);
+        if (m.foreignKeysOff) {
+          const violations = db.pragma("foreign_key_check") as unknown[];
+          if (violations.length > before) {
+            throw new Error(
+              `Migration ${m.version} (${m.name}) introduced foreign key violations ` +
+                `(${before} before, ${violations.length} after): ${JSON.stringify(violations.slice(0, 5))}`,
+            );
+          }
+        }
+        insertApplied.run(m.version, m.name);
+      })();
+    } finally {
+      if (fkWasOn) db.pragma("foreign_keys = ON");
+    }
     appliedCount++;
     log.info({ version: m.version, name: m.name }, "applied migration");
   }

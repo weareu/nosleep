@@ -17,7 +17,7 @@ import {
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { listOrgs, listProjects } from "../services/api";
-import { colors, ORG_COLORS } from "../theme";
+import { colors } from "../theme";
 import type { OrgWithStats, Project } from "../types";
 
 const ORG_LEVEL_PROJECT_ID = "_org_level";
@@ -53,26 +53,39 @@ export function OrgProjectPicker({
     onChangeRef.current = onChange;
   });
 
-  // Refetch orgs every time the screen comes into focus so newly-created
-  // orgs show up without an app restart.
+  const scopeOrgRef = useRef(scope.orgId);
+  scopeOrgRef.current = scope.orgId;
+  const loadOrgs = useCallback(() => {
+    setLoading(true);
+    listOrgs()
+      .then((rs) => {
+        setOrgs(rs);
+        if (!rs.find((o) => o.id === scopeOrgRef.current) && rs.length > 0) {
+          onChangeRef.current({
+            orgId: rs[0].id,
+            projectId: ORG_LEVEL_PROJECT_ID,
+          });
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  // Refetch orgs when the screen comes BACK into focus so newly-created orgs
+  // show up without an app restart. The first load is the mount effect
+  // below: a focus effect alone never fires for the picker inside the
+  // docked mic sheet (rendered from the tab bar, not a screen), which left
+  // the org pill stuck on "…" and the org list empty.
+  const loadedOnceRef = useRef(false);
   useFocusEffect(
     useCallback(() => {
-      setLoading(true);
-      listOrgs()
-        .then((rs) => {
-          setOrgs(rs);
-          if (!rs.find((o) => o.id === scope.orgId) && rs.length > 0) {
-            onChangeRef.current({
-              orgId: rs[0].id,
-              projectId: ORG_LEVEL_PROJECT_ID,
-            });
-          }
-        })
-        .catch(() => {})
-        .finally(() => setLoading(false));
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []),
+      if (loadedOnceRef.current) loadOrgs();
+    }, [loadOrgs]),
   );
+  useEffect(() => {
+    loadedOnceRef.current = true;
+    loadOrgs();
+  }, [loadOrgs]);
 
   useEffect(() => {
     if (!scope.orgId) return;
@@ -92,7 +105,7 @@ export function OrgProjectPicker({
 
   const orgRow = orgs.find((o) => o.id === scope.orgId);
   const orgColor = orgRow
-    ? ORG_COLORS[orgRow.id] ?? colors.primary
+    ? orgRow.color
     : colors.cardBorder;
   const orgLabel = orgRow?.name ?? scope.orgId;
 
@@ -147,7 +160,7 @@ export function OrgProjectPicker({
             <View
               style={[
                 styles.dot,
-                { backgroundColor: ORG_COLORS[o.id] ?? colors.primary },
+                { backgroundColor: o.color },
               ]}
             />
             <View style={{ flex: 1 }}>
@@ -233,8 +246,11 @@ function PickerSheet({
       animationType="fade"
       onRequestClose={onClose}
     >
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
+      {/* accessible={false}: a Pressable is an accessibility element by
+          default, which flattened the whole sheet into ONE VoiceOver node —
+          individual org/project options were unreachable. */}
+      <Pressable style={styles.backdrop} onPress={onClose} accessible={false}>
+        <Pressable style={styles.sheet} onPress={() => {}} accessible={false}>
           <View style={styles.sheetHeader}>
             <Text style={styles.sheetTitle}>{title}</Text>
             <TouchableOpacity onPress={onClose}>

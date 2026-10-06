@@ -1,6 +1,7 @@
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
-import { getOrgColor, ORG_NAMES } from "../theme";
+import { getOrgColor, getOrgName } from "../theme";
+import { useOrgRegistry } from "../hooks/useOrgs";
 
 interface OrgBadgeProps {
   readonly orgId: string;
@@ -8,8 +9,9 @@ interface OrgBadgeProps {
 }
 
 export function OrgBadge({ orgId, size = "small" }: OrgBadgeProps): React.JSX.Element {
+  useOrgRegistry(); // re-render when orgs load or are renamed/recoloured
   const color = getOrgColor(orgId);
-  const name = ORG_NAMES[orgId] ?? orgId;
+  const name = getOrgName(orgId);
   const isSmall = size === "small";
 
   return (

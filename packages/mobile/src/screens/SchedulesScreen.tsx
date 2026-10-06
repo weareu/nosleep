@@ -9,9 +9,9 @@ import {
   Pressable,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { listScheduledTasks, updateScheduledTask } from "../services/api";
+import { listOrgs, listScheduledTasks, updateScheduledTask } from "../services/api";
 import { useRefresh } from "../hooks/useRefresh";
-import { colors, getOrgColor, ORG_NAMES } from "../theme";
+import { colors, getOrgColor, getOrgName } from "../theme";
 
 interface ScheduledTask {
   readonly id: string;
@@ -55,7 +55,7 @@ export function SchedulesScreen(): React.JSX.Element {
 
   const loadData = useCallback(async () => {
     try {
-      const tasks = await listScheduledTasks();
+      const [tasks, orgs] = await Promise.all([listScheduledTasks(), listOrgs()]);
 
       // Group by project
       const grouped = new Map<string, { orgId: string; tasks: ScheduledTask[] }>();
@@ -72,7 +72,11 @@ export function SchedulesScreen(): React.JSX.Element {
 
       // Build sections sorted by org
       const result: TaskSection[] = [];
-      const orgOrder = ["org_personal", "org_wyobi", "org_apply"];
+      const groupOrgIds = [...new Set([...grouped.values()].map((g) => g.orgId))];
+      const orgOrder = [
+        ...orgs.map((o) => o.id),
+        ...groupOrgIds.filter((id) => !orgs.some((o) => o.id === id)),
+      ];
       for (const orgId of orgOrder) {
         for (const [projectId, group] of grouped.entries()) {
           if (group.orgId !== orgId) continue;
@@ -81,7 +85,7 @@ export function SchedulesScreen(): React.JSX.Element {
             ?? (group.tasks[0] as any)?.project_name
             ?? projectId.slice(0, 12);
           result.push({
-            title: `${ORG_NAMES[orgId] ?? orgId} / ${projectName}`,
+            title: `${getOrgName(orgId)} / ${projectName}`,
             orgId,
             orgColor: getOrgColor(orgId),
             projectId,

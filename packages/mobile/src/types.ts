@@ -1,14 +1,16 @@
 // Re-export shared types for convenience within the mobile app
 // These mirror the shared package types
 
-export type OrgSlug = "personal" | "wyobi" | "apply";
+/** Org slug — orgs are user-defined on the server ([a-z0-9-]). */
+export type OrgSlug = string;
 
 export interface Organization {
   readonly id: string;
   readonly name: string;
   readonly slug: OrgSlug;
+  /** Always resolved by the server (stored colour or deterministic palette). */
   readonly color: string;
-  readonly createdAt: string;
+  readonly createdAt?: string;
 }
 
 export type ProjectStatus = "idle" | "running" | "paused" | "error";

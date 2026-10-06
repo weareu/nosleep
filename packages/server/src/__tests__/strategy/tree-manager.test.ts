@@ -247,11 +247,11 @@ describe("StrategyTreeManager", () => {
         title: "Personal Root",
       });
 
-      // Attempt to create a child under personal root but with wyobi orgId
+      // Attempt to create a child under personal root but with work orgId
       expect(() => {
         mgr.createNode({
-          projectId: seeds.wyobi.projectId,
-          orgId: seeds.wyobi.orgId,
+          projectId: seeds.work.projectId,
+          orgId: seeds.work.orgId,
           parentId: personalRoot.id,
           type: "goal",
           title: "Cross-org child",
@@ -282,24 +282,24 @@ describe("StrategyTreeManager", () => {
         title: "Personal Task",
       });
 
-      // Create a tree in wyobi org
+      // Create a tree in work org
       mgr.createNode({
-        projectId: seeds.wyobi.projectId,
-        orgId: seeds.wyobi.orgId,
+        projectId: seeds.work.projectId,
+        orgId: seeds.work.orgId,
         parentId: null,
         type: "strategy",
-        title: "Wyobi Root",
+        title: "Work Root",
       });
 
       const personalTrees = mgr.getOrgTrees(seeds.personal.orgId);
-      const wyobiTrees = mgr.getOrgTrees(seeds.wyobi.orgId);
-      const applyTrees = mgr.getOrgTrees(seeds.apply.orgId);
+      const workTrees = mgr.getOrgTrees(seeds.work.orgId);
+      const sideTrees = mgr.getOrgTrees(seeds.side.orgId);
 
       expect(personalTrees).toHaveLength(1);
       expect(personalTrees[0].root.title).toBe("Personal Root");
-      expect(wyobiTrees).toHaveLength(1);
-      expect(wyobiTrees[0].root.title).toBe("Wyobi Root");
-      expect(applyTrees).toHaveLength(0);
+      expect(workTrees).toHaveLength(1);
+      expect(workTrees[0].root.title).toBe("Work Root");
+      expect(sideTrees).toHaveLength(0);
 
       multiDb.close();
     });

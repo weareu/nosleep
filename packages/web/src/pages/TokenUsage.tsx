@@ -29,18 +29,6 @@ function fetchDailyTokens(days = 30): Promise<DailyTokenRow[]> {
   return apiFetch<DailyTokenRow[]>(`/metrics/tokens/daily?days=${days}`);
 }
 
-const SLUG_BY_ORG: Record<string, string> = {
-  org_personal: "personal",
-  org_wyobi: "wyobi",
-  org_apply: "apply",
-};
-
-const ORG_COLORS: Record<string, string> = {
-  personal: "#6366f1",
-  wyobi: "#f59e0b",
-  apply: "#10b981",
-};
-
 function formatTokens(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
   if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}K`;
@@ -58,9 +46,7 @@ function pivotDailyData(
   days = 30,
 ): Array<Record<string, unknown>> {
   const orgSlug = (orgId: string): string =>
-    SLUG_BY_ORG[orgId] ??
-    orgs.find((o) => o.id === orgId)?.slug ??
-    orgId.replace(/^org_/, "");
+    orgs.find((o) => o.id === orgId)?.slug ?? orgId.replace(/^org_/, "");
 
   const byDay = new Map<string, Record<string, unknown>>();
   for (const r of rows) {
@@ -180,7 +166,7 @@ export function TokenUsage(): React.ReactElement {
               label={org.name}
               used={org.todayTokens}
               limit={1_000_000}
-              color={ORG_COLORS[org.slug] ?? "#6366f1"}
+              color={org.color}
             />
           ))}
         </div>
@@ -222,7 +208,7 @@ export function TokenUsage(): React.ReactElement {
                   type="monotone"
                   dataKey={org.slug}
                   name={org.name}
-                  stroke={ORG_COLORS[org.slug] ?? "#6366f1"}
+                  stroke={org.color}
                   strokeWidth={2}
                   dot={false}
                 />
@@ -266,7 +252,7 @@ export function TokenUsage(): React.ReactElement {
                   dataKey={org.slug}
                   name={org.name}
                   stackId="tokens"
-                  fill={ORG_COLORS[org.slug] ?? "#6366f1"}
+                  fill={org.color}
                 />
               ))}
             </BarChart>

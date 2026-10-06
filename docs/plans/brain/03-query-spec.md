@@ -6,7 +6,7 @@
 
 ```json
 {
-  "org_id": "org_wyobi",
+  "org_id": "org_work",
   "project_id": "proj_auth_rewrite",
   "scope": "project",
   "layers": ["archive", "thoughts"],

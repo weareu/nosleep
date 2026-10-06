@@ -8,7 +8,7 @@ might choose differently.
 
 ```bash
 npm run setup                          # interactive
-npm run setup -- --steps llm,brain     # only some steps (llm, brain, research, claude, mobile, service, doctor)
+npm run setup -- --steps llm,brain     # only some steps (llm, brain, research, claude, mobile, service, orgs, doctor)
 npm run setup -- --yes                 # accept every default (= keep current values)
 npm run setup -- --dry-run             # print the planned .env diff, secrets masked; write nothing
 npm run doctor                         # non-interactive health check (exit 1 on a failure)
@@ -143,7 +143,20 @@ This runs the same installer as `node scripts/install.mjs --service`:
 LaunchAgents on macOS, systemd user units on Linux, and Task Scheduler on
 Windows (experimental). The default is **No**.
 
-## 7. Doctor
+## 7. Organizations
+
+Orgs are user-defined. A fresh install has only **Personal** (`org_personal`).
+This step lists the orgs the running server knows (`GET /api/orgs`) and offers
+to create more: a name (1–60 chars), an optional slug (`a-z`, `0-9`, `-`, max
+40; derived from the name when blank — the org id becomes `org_<slug>`) and an
+optional `#rrggbb` colour (automatic when blank). Each org isolates its
+projects, sessions, memory, alerts and Brain. The server must be running; if it
+isn't, start it and re-run `npm run setup -- --steps orgs`. `--yes` creates
+nothing. You can also manage orgs in the dashboard (Settings → Organizations),
+with `POST/PATCH/DELETE /api/orgs`, or the `org_create` MCP action. For a
+per-org API key set `NOSLEEP_API_KEY_<SLUG>` (upper-cased, `-` → `_`).
+
+## 8. Doctor
 
 `npm run doctor` (`node scripts/setup.mjs doctor`, or `node scripts/doctor.mjs`)
 runs without prompts and never starts anything:

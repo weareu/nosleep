@@ -20,7 +20,7 @@ beforeAll(() => {
 
   // Seed an org, project, account, session.
   // org_personal seeded by migrations (slug CHECK constraint allowlists
-  // only personal|wyobi|apply). Override the colour for assertion clarity.
+  // only personal|work|side). Override the colour for assertion clarity.
   db.prepare(
     `UPDATE organizations SET color = '#abcdef' WHERE id = 'org_personal'`,
   ).run();

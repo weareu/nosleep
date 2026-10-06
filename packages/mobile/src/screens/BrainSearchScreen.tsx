@@ -26,7 +26,6 @@ import {
 } from "../services/brainApi";
 import { colors } from "../theme";
 import { OrgProjectPicker } from "../components/OrgProjectPicker";
-import { FAB_CONTENT_INSET } from "../components/GlobalMicFab";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 
 const DEFAULT_ORG = "org_personal";
@@ -143,7 +142,7 @@ export function BrainSearchScreen(): React.JSX.Element {
       <FlatList
         data={items}
         keyExtractor={(r) => r.hash}
-        contentContainerStyle={{ padding: 12, gap: 8, paddingBottom: FAB_CONTENT_INSET }}
+        contentContainerStyle={{ padding: 12, gap: 8 }}
         ListEmptyComponent={
           !loading && !err ? (
             <Text style={styles.empty}>

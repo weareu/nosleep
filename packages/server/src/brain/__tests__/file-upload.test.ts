@@ -32,9 +32,9 @@ process.env.NOSLEEP_BRAIN_EMBED_INLINE = "0";
 process.env.NOSLEEP_URL_FETCH_ALLOW_HOSTS = "127.0.0.1";
 // Per-org keys → request.orgId binding (cross-org tests).
 const KEY_PERSONAL = "personal-key-0123456789";
-const KEY_WYOBI = "wyobi-key-0123456789abc";
+const KEY_WORK = "work-key-0123456789abc";
 process.env.NOSLEEP_API_KEY_PERSONAL = KEY_PERSONAL;
-process.env.NOSLEEP_API_KEY_WYOBI = KEY_WYOBI;
+process.env.NOSLEEP_API_KEY_WORK = KEY_WORK;
 
 import { registerAuth } from "../../auth.js";
 import { registerBrainIngestRoutes } from "../routes/ingest.js";
@@ -105,7 +105,10 @@ const PDF = buildTestPdf(["Quarterly zebrafish migration report", "Appendix on q
 beforeAll(async () => {
   activeDbFor(ORG);
   app = Fastify({ logger: false, bodyLimit: 16 * 1024 * 1024 });
-  registerAuth(app, undefined);
+  registerAuth(app, undefined, () => [
+    { id: "org_personal", slug: "personal" },
+    { id: "org_work", slug: "work" },
+  ]);
   registerBrainIngestRoutes(app);
   registerBrainSearchRoutes(app);
   registerBrainHookIngestRoutes(app);
@@ -311,7 +314,7 @@ describe("POST /api/brain/ingest/file — rejections", () => {
   test("a key bound to one org cannot upload into another (403)", async () => {
     const res = await upload(
       { filename: "x.md", content_base64: Buffer.from("cross org attempt text").toString("base64") },
-      KEY_WYOBI,
+      KEY_WORK,
     );
     expect(res.statusCode).toBe(403);
   });
@@ -440,7 +443,7 @@ describe("POST /api/brain/capture-url", () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/brain/capture-url",
-      headers: auth(KEY_WYOBI),
+      headers: auth(KEY_WORK),
       payload: { url: `${fixtureBase}/article`, org_id: ORG, project_id: PROJ, mode: "ref" },
     });
     expect(res.statusCode).toBe(403);

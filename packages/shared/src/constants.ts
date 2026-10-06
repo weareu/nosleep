@@ -1,12 +1,4 @@
-// ── Organizations ───────────────────────────────────────
-
-export const ORGS = {
-  personal: { id: "org_personal", name: "Personal", slug: "personal", color: "#6366f1" },
-  wyobi: { id: "org_wyobi", name: "Wyobi", slug: "wyobi", color: "#f59e0b" },
-  apply: { id: "org_apply", name: "Apply", slug: "apply", color: "#10b981" },
-} as const;
-
-export const ORG_IDS = ["org_personal", "org_wyobi", "org_apply"] as const;
+// Organizations are user-defined (see ./orgs.ts) — no org list lives in code.
 
 // ── Budget Pacing Thresholds ─────────────────────────────
 // Percentage of daily allowance used

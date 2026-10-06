@@ -141,9 +141,9 @@ describe("memory actions", () => {
 
     it("returns empty message for org with no memories", async () => {
       const result = await dispatch(actions, "memory_list", undefined, {
-        orgId: "org_apply",
+        orgId: "org_side",
       });
-      expect(result.text).toContain("No memories in Apply");
+      expect(result.text).toContain("No memories in Side");
     });
   });
 
@@ -168,9 +168,9 @@ describe("memory actions", () => {
     });
 
     it("cannot delete memory from a different org", async () => {
-      // Try to delete personal memory using wyobi org
+      // Try to delete personal memory using work org
       const result = await dispatch(actions, "memory_delete", undefined, {
-        orgId: "org_wyobi",
+        orgId: "org_work",
         id: seed.memoryId1,
       });
       expect(result.text).toContain("Not found");
@@ -182,16 +182,16 @@ describe("memory actions", () => {
   });
 
   describe("org isolation", () => {
-    it("personal memory is not visible in wyobi search", async () => {
+    it("personal memory is not visible in work search", async () => {
       const result = await dispatch(actions, "memory_search", undefined, {
-        orgId: "org_wyobi",
+        orgId: "org_work",
         query: "sqlite",
       });
       // "use-sqlite" belongs to org_personal, should not appear
       expect(result.text).not.toContain("use-sqlite");
     });
 
-    it("wyobi memory is not visible in personal search", async () => {
+    it("work memory is not visible in personal search", async () => {
       const result = await dispatch(actions, "memory_search", undefined, {
         orgId: "org_personal",
         query: "deploy-target",
@@ -201,7 +201,7 @@ describe("memory actions", () => {
 
     it("memory_list only shows own org", async () => {
       const result = await dispatch(actions, "memory_list", undefined, {
-        orgId: "org_wyobi",
+        orgId: "org_work",
       });
       expect(result.text).toContain("deploy-target");
       expect(result.text).not.toContain("use-sqlite");

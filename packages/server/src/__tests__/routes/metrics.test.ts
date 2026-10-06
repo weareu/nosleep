@@ -150,9 +150,9 @@ describe("GET /api/metrics", () => {
     });
     insertSession(db, {
       id: "s_w",
-      projectId: ids.wyobi.projectId,
-      orgId: ids.wyobi.orgId,
-      accountId: ids.wyobi.accountId,
+      projectId: ids.work.projectId,
+      orgId: ids.work.orgId,
+      accountId: ids.work.accountId,
       status: "running",
     });
 
@@ -270,9 +270,9 @@ describe("GET /api/metrics/by-org", () => {
     });
     insertSession(db, {
       id: "w1",
-      projectId: ids.wyobi.projectId,
-      orgId: ids.wyobi.orgId,
-      accountId: ids.wyobi.accountId,
+      projectId: ids.work.projectId,
+      orgId: ids.work.orgId,
+      accountId: ids.work.accountId,
       status: "completed",
       tokensUsed: 2000,
     });
@@ -280,10 +280,10 @@ describe("GET /api/metrics/by-org", () => {
     const res = await app.inject({ method: "GET", url: "/api/metrics/by-org" });
     const body = res.json() as { data: Array<{ org_id: string; session_count: number; token_total: number }> };
     const personal = body.data.find((r) => r.org_id === "org_personal")!;
-    const wyobi = body.data.find((r) => r.org_id === "org_wyobi")!;
+    const work = body.data.find((r) => r.org_id === "org_work")!;
     expect(personal.session_count).toBe(2);
     expect(personal.token_total).toBe(1500);
-    expect(wyobi.session_count).toBe(1);
-    expect(wyobi.token_total).toBe(2000);
+    expect(work.session_count).toBe(1);
+    expect(work.token_total).toBe(2000);
   });
 });

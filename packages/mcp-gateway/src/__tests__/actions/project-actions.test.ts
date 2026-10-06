@@ -30,9 +30,9 @@ describe("project actions", () => {
       expect(result.text).toContain("500,000");
     });
 
-    it("returns projects for wyobi org", async () => {
-      const result = await dispatch(actions, "project_list", undefined, { orgId: "org_wyobi" });
-      expect(result.text).toContain("# Projects [Wyobi]");
+    it("returns projects for work org", async () => {
+      const result = await dispatch(actions, "project_list", undefined, { orgId: "org_work" });
+      expect(result.text).toContain("# Projects [Work]");
       expect(result.text).toContain("Work Dashboard");
     });
 
@@ -42,8 +42,8 @@ describe("project actions", () => {
     });
 
     it("returns empty message for org with no projects", async () => {
-      const result = await dispatch(actions, "project_list", undefined, { orgId: "org_apply" });
-      expect(result.text).toContain("No projects in Apply");
+      const result = await dispatch(actions, "project_list", undefined, { orgId: "org_side" });
+      expect(result.text).toContain("No projects in Side");
     });
 
     it("resolves org by slug", async () => {

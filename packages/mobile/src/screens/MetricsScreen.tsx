@@ -10,7 +10,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { fetchMetrics, listOrgs, type MetricsSnapshot } from "../services/api";
 import { useRefresh } from "../hooks/useRefresh";
-import { colors, getOrgColor, ORG_NAMES } from "../theme";
+import { colors, getOrgColor } from "../theme";
 import type { OrgWithStats } from "../types";
 
 const WINDOWS = [
@@ -95,7 +95,7 @@ export function MetricsScreen(): React.JSX.Element {
                   orgFilter === o.id && styles.filterChipTextActive,
                 ]}
               >
-                {ORG_NAMES[o.id] ?? o.name}
+                {o.name}
               </Text>
             </Pressable>
           ))}

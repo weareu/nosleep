@@ -14,21 +14,20 @@ import { listAlerts, acknowledgeAlert, acknowledgeAllAlerts } from "../services/
 import { useRefresh } from "../hooks/useRefresh";
 import { useWsEvent } from "../hooks/useWsEvent";
 import { colors, getOrgColor } from "../theme";
-import { FAB_CONTENT_INSET } from "../components/GlobalMicFab";
-import type { Alert, OrgSlug } from "../types";
+import type { Alert } from "../types";
+import { useOrgs } from "../hooks/useOrgs";
 
-type FilterOption = "all" | "org_personal" | "org_wyobi" | "org_apply";
-
-const FILTERS: readonly { key: FilterOption; label: string; color: string }[] = [
-  { key: "all", label: "All", color: colors.textSecondary },
-  { key: "org_personal", label: "Personal", color: colors.personal },
-  { key: "org_wyobi", label: "Wyobi", color: colors.wyobi },
-  { key: "org_apply", label: "Apply", color: colors.apply },
-] as const;
+/** "all" or an org id (orgs are user-defined, loaded from the server). */
+type FilterOption = string;
 
 export function AlertsScreen(): React.JSX.Element {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [filter, setFilter] = useState<FilterOption>("all");
+  const { orgs, reload: reloadOrgs } = useOrgs();
+  const filters: readonly { key: FilterOption; label: string; color: string }[] = [
+    { key: "all", label: "All", color: colors.textSecondary },
+    ...orgs.map((o) => ({ key: o.id, label: o.name, color: getOrgColor(o.id) })),
+  ];
 
   const loadData = useCallback(async () => {
     try {
@@ -52,7 +51,10 @@ export function AlertsScreen(): React.JSX.Element {
   useWsEvent("alert:new", handleWsUpdate);
   useWsEvent("alert:ack", handleWsUpdate);
 
-  const { refreshing, handleRefresh } = useRefresh(loadData);
+  const refreshAll = useCallback(async () => {
+    await Promise.all([loadData(), reloadOrgs()]);
+  }, [loadData, reloadOrgs]);
+  const { refreshing, handleRefresh } = useRefresh(refreshAll);
 
   const handleAcknowledge = useCallback(
     async (alertId: number) => {
@@ -97,7 +99,7 @@ export function AlertsScreen(): React.JSX.Element {
 
       {/* Filter chips */}
       <View style={styles.filterRow}>
-        {FILTERS.map((f) => (
+        {filters.map((f) => (
           <Pressable
             key={f.key}
             style={[
@@ -173,6 +175,7 @@ const styles = StyleSheet.create({
   },
   filterRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     paddingHorizontal: 16,
     paddingBottom: 12,
     gap: 8,
@@ -191,8 +194,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   listContent: {
-    // Clear the floating mic button so the last rows/badges aren't covered.
-    paddingBottom: FAB_CONTENT_INSET,
+    paddingBottom: 20,
   },
   emptyText: {
     color: colors.textMuted,

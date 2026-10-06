@@ -52,10 +52,30 @@ export interface OrgWithStats {
   readonly activeSessions: number;
   readonly unackedAlerts: number;
   readonly todayTokens: number;
+  /** Env var that holds this org's optional per-org API key. */
+  readonly apiKeyEnv?: string;
 }
 
 export function fetchOrgs(): Promise<OrgWithStats[]> {
   return apiFetch<OrgWithStats[]>("/orgs");
+}
+
+export interface OrgInput {
+  readonly name: string;
+  readonly slug?: string;
+  readonly color?: string;
+}
+
+export function createOrg(payload: OrgInput): Promise<OrgWithStats> {
+  return apiFetch<OrgWithStats>("/orgs", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function updateOrg(id: string, payload: { name?: string; color?: string }): Promise<OrgWithStats> {
+  return apiFetch<OrgWithStats>(`/orgs/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) });
+}
+
+export function deleteOrg(id: string): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>(`/orgs/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 // --- Projects ---

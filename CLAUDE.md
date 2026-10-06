@@ -22,7 +22,7 @@ NoSleep.
 - **MCP**: 6 servers (control + memory per org), org-scoped via `NOSLEEP_ORG_ID`
 
 ## Organization Isolation
-Three orgs with HARD boundaries: **Personal** (`org_personal`), **Wyobi** (`org_wyobi`), **Apply** (`org_apply`). Each has its own accounts, projects, memory, alerts. Memory never leaks across orgs.
+Orgs are USER-DEFINED with HARD boundaries. The `organizations` table is the single source of truth (id `org_<slug>`, slug `[a-z0-9-]`, name, colour); fresh installs seed only **Personal** (`org_personal`, the undeletable default). Create/rename/delete via the dashboard (Settings → Organizations), `POST/PATCH/DELETE /api/orgs`, the MCP `org_list`/`org_create` actions, or the setup wizard — delete is refused (409) while an org still owns data. Each org has its own accounts, projects, memory, alerts, brain. Memory never leaks across orgs. Never hard-code an org list or colour in code — read `/api/orgs` (shared helpers in `packages/shared/src/orgs.ts`).
 
 ## Key Files
 - `packages/server/src/server.ts` — main server, wires all components

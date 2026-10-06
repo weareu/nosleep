@@ -26,7 +26,7 @@ Phase 0 complete.
 8. `/api/brain/artifacts/:hash` read route with `include` query params.
 9. `/api/brain/sessions/:session_id/artifacts` paginated read.
 10. URL fetcher worker (`packages/server/src/brain/extractors/url-fetcher.ts`): fetch + og-tag parse (using `cheerio`), insert `reference/link` artifact. Mode=ref only; skip Readability.
-11. MCP brain server scaffold (`packages/mcp-brain/`): new package mirroring mcp-control / mcp-memory structure. Exposes `search_archive`, `get_artifact`, `session_artifacts`. Wired into `.mcp.json` for all 3 orgs.
+11. MCP brain server scaffold (`packages/mcp-brain/`): new package mirroring mcp-control / mcp-memory structure. Exposes `search_archive`, `get_artifact`, `session_artifacts`. Wired into `.mcp.json` for every org.
 12. Web dashboard:
     - Route `/brain/archive` — virtualized table/list, filter panel (project, kind prefix tree, date), snippet column with FTS highlights.
     - Route `/brain/search` — structured QuerySpec builder form.

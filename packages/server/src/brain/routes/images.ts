@@ -54,7 +54,10 @@ interface PhashCluster {
   hashes: string[];
 }
 
-function clusterByPhash(rows: ImageRow[], radius: number): PhashCluster[] {
+function clusterByPhash(
+  rows: Array<Pick<ImageRow, "hash" | "phash">>,
+  radius: number,
+): PhashCluster[] {
   const clusters: PhashCluster[] = [];
   const claimed = new Set<string>();
 
@@ -121,13 +124,22 @@ export function registerBrainImageListRoutes(fastify: FastifyInstance): void {
             LIMIT ?`,
         )
         .safeIntegers(true)
-        .all(...params, q.data.limit) as Array<ImageRow & { ts: bigint }>;
+        .all(...params, q.data.limit) as Array<
+          Omit<ImageRow, "ts" | "width" | "height"> & {
+            ts: bigint;
+            width: bigint | null;
+            height: bigint | null;
+          }
+        >;
 
-      // Re-coerce ts back to number for JSON friendliness; phash stays bigint
-      // for lossless cluster math.
+      // safeIntegers(true) returns EVERY integer column as BigInt, which
+      // JSON can't serialise. Re-coerce ts/width/height to numbers; phash
+      // stays bigint for lossless cluster math and goes out as a string.
       const items = rows.map((r) => ({
         ...r,
         ts: Number(r.ts),
+        width: r.width !== null ? Number(r.width) : null,
+        height: r.height !== null ? Number(r.height) : null,
         phash: r.phash !== null ? r.phash.toString() : null,
       }));
 

@@ -18,16 +18,23 @@ import { wsManager } from "../services/ws";
 import { useWsEvent } from "../hooks/useWsEvent";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, TAB_BAR_HEIGHT } from "../theme";
+import { MicTabButton } from "../components/MicTabButton";
 
 type TabParamList = {
   Dashboard: undefined;
   Projects: undefined;
+  Capture: undefined;
   Brain: undefined;
   Alerts: undefined;
   More: undefined;
 };
 
 const Tab = createBottomTabNavigator<TabParamList>();
+
+/** The "Capture" tab never navigates — its button opens the mic sheet. */
+function CapturePlaceholder(): null {
+  return null;
+}
 
 type MoreStackParamList = {
   MoreMenu: undefined;
@@ -52,7 +59,9 @@ function MoreStackNavigator(): React.JSX.Element {
       <MoreStack.Screen
         name="MoreMenu"
         component={MoreScreen}
-        options={{ headerShown: false }}
+        // title feeds the back button on pushed screens ("< More", not
+        // the route name "< MoreMenu").
+        options={{ headerShown: false, title: "More" }}
       />
       <MoreStack.Screen
         name="Strategy"
@@ -150,7 +159,8 @@ export function TabNavigator(): React.JSX.Element {
           borderTopWidth: 1,
           height: TAB_BAR_HEIGHT + insets.bottom,
         },
-        // 5 main tabs with labels: Dashboard · Projects · Brain · Alerts · More.
+        // Dashboard · Projects · [mic] · Brain · Alerts · More. The centre
+        // mic is docked IN the bar so it never covers screen content.
         // Strategy / Schedules / Tokens / Metrics / Settings live under More.
         // Explicit 14px line box (with TAB_BAR_HEIGHT leaving room for it):
         // the squeezed default clipped the "j" in "Projects" ("Proiects").
@@ -177,6 +187,12 @@ export function TabNavigator(): React.JSX.Element {
             <Ionicons name="folder" size={size} color={color} />
           ),
         }}
+      />
+      <Tab.Screen
+        name="Capture"
+        component={CapturePlaceholder}
+        options={{ tabBarButton: () => <MicTabButton /> }}
+        listeners={{ tabPress: (e) => e.preventDefault() }}
       />
       <Tab.Screen
         name="Brain"

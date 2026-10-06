@@ -240,7 +240,7 @@ export function Projects(): React.ReactElement {
                   className="flex-1 min-w-0 pl-5 py-3 flex items-center gap-3 text-left"
                 >
                   <OrgBadge slug={org.slug} name={org.name} color={org.color} size="md" />
-                  <span className="text-sm text-slate-500">{orgProjects.length} projects</span>
+                  <span className="text-sm text-slate-500">{orgProjects.length} {orgProjects.length === 1 ? "project" : "projects"}</span>
                 </button>
                 <HookOrgAction
                   orgId={org.id}

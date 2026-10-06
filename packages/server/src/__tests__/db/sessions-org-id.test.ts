@@ -44,7 +44,7 @@ describe("sessions.org_id column", () => {
   });
 
   it("supports direct org filtering without JOIN through projects", () => {
-    const { personal, wyobi } = seedMultiOrg(db);
+    const { personal, work } = seedMultiOrg(db);
     db.prepare(`
       INSERT INTO sessions (id, project_id, org_id, account_id, status, goal_text, goal_hash)
       VALUES (?, ?, ?, ?, 'running', 'g1', 'h1')
@@ -52,7 +52,7 @@ describe("sessions.org_id column", () => {
     db.prepare(`
       INSERT INTO sessions (id, project_id, org_id, account_id, status, goal_text, goal_hash)
       VALUES (?, ?, ?, ?, 'running', 'g2', 'h2')
-    `).run("s_w1", wyobi.projectId, wyobi.orgId, wyobi.accountId);
+    `).run("s_w1", work.projectId, work.orgId, work.accountId);
 
     const personalSessions = db
       .prepare(`SELECT id FROM sessions WHERE org_id = ?`)
@@ -60,11 +60,11 @@ describe("sessions.org_id column", () => {
     expect(personalSessions).toHaveLength(1);
     expect(personalSessions[0].id).toBe("s_p1");
 
-    const wyobiSessions = db
+    const workSessions = db
       .prepare(`SELECT id FROM sessions WHERE org_id = ?`)
-      .all(wyobi.orgId) as Array<{ id: string }>;
-    expect(wyobiSessions).toHaveLength(1);
-    expect(wyobiSessions[0].id).toBe("s_w1");
+      .all(work.orgId) as Array<{ id: string }>;
+    expect(workSessions).toHaveLength(1);
+    expect(workSessions[0].id).toBe("s_w1");
   });
 
   it("goal_progress style query no longer has ambiguous id column", () => {

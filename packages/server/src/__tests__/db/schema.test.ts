@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTestDb } from "../helpers/db.js";
+import { initializeDatabase } from "../../db/schema.js";
 
 describe("initializeDatabase", () => {
   it("returns a valid Database object", () => {
@@ -38,18 +39,17 @@ describe("initializeDatabase", () => {
     db.close();
   });
 
-  it("seeds all 3 organizations automatically", () => {
+  it("seeds only the default Personal org on a fresh DB", () => {
+    const db = initializeDatabase(":memory:");
+    const orgs = db.prepare("SELECT id, slug FROM organizations").all();
+    expect(orgs).toEqual([{ id: "org_personal", slug: "personal" }]);
+    db.close();
+  });
+
+  it("test DB adds the generic user-defined test orgs", () => {
     const db = createTestDb();
-
-    const orgs = db.prepare("SELECT id, slug FROM organizations ORDER BY slug").all() as Array<{
-      id: string;
-      slug: string;
-    }>;
-
-    expect(orgs).toHaveLength(3);
-    expect(orgs.map((o) => o.slug)).toEqual(["apply", "personal", "wyobi"]);
-    expect(orgs.map((o) => o.id)).toEqual(["org_apply", "org_personal", "org_wyobi"]);
-
+    const orgs = db.prepare("SELECT id FROM organizations ORDER BY id").all() as Array<{ id: string }>;
+    expect(orgs.map((o) => o.id)).toEqual(["org_personal", "org_side", "org_work"]);
     db.close();
   });
 

@@ -148,9 +148,11 @@ await fastify.register(rateLimit, {
   },
 });
 
-registerAuth(fastify, env.NOSLEEP_API_KEY);
-
 const services = initServices({ dbPath: env.DB_PATH, logger: fastify.log });
+
+// Per-org keys resolve against the live organizations table (user-defined).
+const orgKeyStmt = services.db.prepare(`SELECT id, slug FROM organizations`);
+registerAuth(fastify, env.NOSLEEP_API_KEY, () => orgKeyStmt.all() as Array<{ id: string; slug: string }>);
 
 initBroadcaster();
 registerHealthRoutes(fastify, services);

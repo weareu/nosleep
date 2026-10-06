@@ -7,12 +7,14 @@
  *    `x-api-key: <KEY>`. Backwards compatible. `request.orgId` is null;
  *    routes still trust `body.org_id`. Suitable for single-tenant dev.
  *
- * 2. **Per-org keys (Phase 12)** — set
- *    `NOSLEEP_API_KEY_PERSONAL=<keyA>`, `NOSLEEP_API_KEY_WYOBI=<keyB>`,
- *    etc. The middleware binds the resolved org_id to `request.orgId`.
- *    Route handlers can call `assertOrgMatches(request, body.org_id)`
- *    to refuse cross-org writes. Closes the cross-org bypass surfaced
- *    in the security review.
+ * 2. **Per-org keys** — for ANY org in the `organizations` table, set
+ *    `NOSLEEP_API_KEY_<SLUG_UPPER>=<key>` (min 16 chars; `-` in the slug
+ *    becomes `_`, e.g. slug `client-x` → `NOSLEEP_API_KEY_CLIENT_X`). The
+ *    middleware binds the resolved org_id to `request.orgId`. Orgs are
+ *    resolved at request time, so an org created after boot gets its key
+ *    honoured without a restart (the env var itself is read from the
+ *    process environment). Route handlers can call
+ *    `assertOrgMatches(request, body.org_id)` to refuse cross-org writes.
  *
  * Constant-time compare defends against timing attacks. Exempts a small
  * allowlist of paths used by health probes, hook callbacks, the WebSocket
@@ -21,6 +23,7 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { timingSafeEqual } from "node:crypto";
+import { orgApiKeyEnvName } from "@nosleep/shared";
 
 const HOOK_CALLBACK_PATHS = new Set([
   "/api/hooks/pre-tool",
@@ -99,17 +102,23 @@ interface PerOrgKeyMap {
   [key: string]: string;
 }
 
+/** Minimal org identity the auth layer needs to map keys → org ids. */
+export interface OrgKeyRef {
+  readonly id: string;
+  readonly slug: string;
+}
+
+export type OrgSource = () => readonly OrgKeyRef[];
+
 /**
- * Read NOSLEEP_API_KEY_<UPPER_SLUG> env vars and return a key→orgId
- * lookup. Slugs map to org_ids: PERSONAL → org_personal, WYOBI →
- * org_wyobi, APPLY → org_apply.
+ * Read NOSLEEP_API_KEY_<SLUG_UPPER> for every known org and return a
+ * key→orgId lookup. Keys shorter than 16 chars are ignored.
  */
-function buildPerOrgKeyMap(): PerOrgKeyMap {
+function buildPerOrgKeyMap(orgs: readonly OrgKeyRef[], env: NodeJS.ProcessEnv = process.env): PerOrgKeyMap {
   const map: PerOrgKeyMap = {};
-  for (const slug of ["personal", "wyobi", "apply"] as const) {
-    const env = `NOSLEEP_API_KEY_${slug.toUpperCase()}`;
-    const v = process.env[env];
-    if (v && v.length >= 16) map[v] = `org_${slug}`;
+  for (const org of orgs) {
+    const v = env[orgApiKeyEnvName(org.slug)];
+    if (v && v.length >= 16) map[v] = org.id;
   }
   return map;
 }
@@ -143,20 +152,16 @@ export function assertOrgMatches(
 export function registerAuth(
   fastify: FastifyInstance,
   apiKey: string | undefined,
+  orgSource: OrgSource = () => [],
 ): void {
-  const perOrgKeys = buildPerOrgKeyMap();
-  const hasPerOrg = Object.keys(perOrgKeys).length > 0;
-
-  // Skip auth entirely if no keys are configured (local dev mode).
-  if (!apiKey && !hasPerOrg) {
-    fastify.addHook("preHandler", async (request) => {
-      request.orgId = null;
-    });
-    return;
-  }
-
   fastify.addHook("preHandler", async (request, reply) => {
     request.orgId = null;
+    // Resolved per request so orgs created at runtime pick up their key.
+    const perOrgKeys = buildPerOrgKeyMap(orgSource());
+    const hasPerOrg = Object.keys(perOrgKeys).length > 0;
+    // No keys configured at all → local dev mode, no auth.
+    if (!apiKey && !hasPerOrg) return;
+
     const path = request.url.split("?")[0];
     if (isAuthExempt(request.method, path, request.ip)) return;
     const provided = request.headers["x-api-key"];

@@ -145,7 +145,7 @@ export function registerSessionRoutes(
 
     // Look up by path, PREFERRING the payload org but falling back to any org
     // with that path. A truly-global hook (installed in ~/.claude/settings.json)
-    // bakes a default org, so a session in e.g. a Wyobi project folder would
+    // bakes a default org, so a session in e.g. a work-org project folder would
     // post org_personal; resolving by path lets us attribute it to the
     // project's TRUE org (project.org_id is authoritative for the session).
     const lookupProject = (path: string): ProjectRow | undefined => {

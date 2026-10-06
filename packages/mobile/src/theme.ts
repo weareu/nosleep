@@ -1,4 +1,5 @@
 import { StyleSheet } from "react-native";
+import { orgColor, orgName } from "./services/orgs";
 
 // ── Colors ──────────────────────────────────────────────
 
@@ -13,11 +14,6 @@ export const colors = {
   textPrimary: "#f8fafc",   // slate-50
   textSecondary: "#94a3b8", // slate-400
   textMuted: "#64748b",     // slate-500
-
-  // Org colors
-  personal: "#6366f1", // indigo
-  wyobi: "#f59e0b",    // amber
-  apply: "#10b981",    // emerald
 
   // Status colors
   statusStarting: "#60a5fa",  // blue-400
@@ -49,21 +45,9 @@ export const colors = {
  * Bottom tab bar height ABOVE the safe-area inset. Tall enough for the
  * 24px icon + a 14px label line + item padding — react-navigation's 49px
  * default squeezed the label box to 10px and clipped descenders
- * ("Proiects"). The floating mic button positions itself from this too.
+ * ("Proiects"). The docked mic button (MicTabButton) is sized to fit it.
  */
 export const TAB_BAR_HEIGHT = 58;
-
-export const ORG_COLORS: Record<string, string> = {
-  org_personal: colors.personal,
-  org_wyobi: colors.wyobi,
-  org_apply: colors.apply,
-};
-
-export const ORG_NAMES: Record<string, string> = {
-  org_personal: "Personal",
-  org_wyobi: "Wyobi",
-  org_apply: "Apply",
-};
 
 export function getStatusColor(status: string): string {
   const map: Record<string, string> = {
@@ -88,8 +72,14 @@ export function getSeverityColor(severity: string): string {
   return map[severity] ?? colors.textMuted;
 }
 
-export function getOrgColor(orgId: string): string {
-  return ORG_COLORS[orgId] ?? colors.textMuted;
+/** Org colour from the server-driven org registry (neutral until loaded). */
+export function getOrgColor(orgId: string | null | undefined): string {
+  return orgColor(orgId);
+}
+
+/** Org display name from the registry (falls back to the raw id). */
+export function getOrgName(orgId: string | null | undefined): string {
+  return orgName(orgId);
 }
 
 // ── Common Styles ───────────────────────────────────────

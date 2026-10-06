@@ -49,10 +49,10 @@ describe("GET /api/projects", () => {
 
   it("includes org name and color via JOIN", async () => {
     seedMultiOrg(db);
-    const res = await app.inject({ method: "GET", url: "/api/projects?orgId=org_wyobi" });
+    const res = await app.inject({ method: "GET", url: "/api/projects?orgId=org_work" });
     const body = res.json() as { data: Array<{ org_name: string; org_slug: string; org_color: string }> };
-    expect(body.data[0].org_name).toBe("Wyobi");
-    expect(body.data[0].org_slug).toBe("wyobi");
+    expect(body.data[0].org_name).toBe("Work");
+    expect(body.data[0].org_slug).toBe("work");
     expect(body.data[0].org_color).toBe("#f59e0b");
   });
 });

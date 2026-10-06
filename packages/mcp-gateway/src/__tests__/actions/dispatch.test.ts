@@ -33,7 +33,7 @@ describe("dispatch", () => {
   it('action="help" returns help', async () => {
     const result = await dispatch(actions, "help");
     expect(result.text).toContain("# NoSleep Actions");
-    expect(result.text).toContain("org_personal");
+    expect(result.text).toContain("org_list");
   });
 
   it('action="search" with query="strategy" finds strategy actions', async () => {

@@ -50,15 +50,13 @@ const INITIAL_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS organizations (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  slug TEXT NOT NULL UNIQUE CHECK(slug IN ('personal', 'wyobi', 'apply')),
+  slug TEXT NOT NULL UNIQUE,
   color TEXT NOT NULL DEFAULT '#6366f1',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 INSERT OR IGNORE INTO organizations (id, name, slug, color) VALUES
-  ('org_personal', 'Personal', 'personal', '#6366f1'),
-  ('org_wyobi', 'Wyobi', 'wyobi', '#f59e0b'),
-  ('org_apply', 'Apply', 'apply', '#10b981');
+  ('org_personal', 'Personal', 'personal', '#6366f1');
 
 CREATE TABLE IF NOT EXISTS accounts (
   id TEXT PRIMARY KEY,
@@ -494,6 +492,39 @@ export const MIGRATIONS: readonly Migration[] = [
           updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
       `).run();
+    },
+  },
+  {
+    version: 25,
+    name: "organizations_user_defined",
+    // Older installs created `organizations` with a CHECK constraint pinning
+    // slug to a fixed list. Orgs are user-defined now, so rebuild the table
+    // without it — preserving every row and id exactly. SQLite cannot drop a
+    // constraint in place; the documented 12-step rebuild needs foreign keys
+    // OFF (8 tables reference organizations(id)), which the runner handles
+    // and follows with a foreign_key_check before committing.
+    foreignKeysOff: true,
+    up: (db) => {
+      const row = db
+        .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'organizations'`)
+        .get() as { sql: string } | undefined;
+      if (!row || !/CHECK\s*\(/i.test(row.sql)) return; // already unconstrained
+      db.prepare(`DROP TABLE IF EXISTS organizations_rebuild`).run();
+      db.prepare(`
+        CREATE TABLE organizations_rebuild (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          slug TEXT NOT NULL UNIQUE,
+          color TEXT NOT NULL DEFAULT '#6366f1',
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `).run();
+      db.prepare(`
+        INSERT INTO organizations_rebuild (id, name, slug, color, created_at)
+        SELECT id, name, slug, color, created_at FROM organizations
+      `).run();
+      db.prepare(`DROP TABLE organizations`).run();
+      db.prepare(`ALTER TABLE organizations_rebuild RENAME TO organizations`).run();
     },
   },
 ];
